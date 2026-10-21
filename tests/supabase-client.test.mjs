@@ -167,3 +167,35 @@ test('다른 참여자의 동시 수정은 다음 동기화에서 더 높은 버
   assert.deepEqual(versions, [[1, '원래 제목'], [2, '친구의 수정']]);
   stop();
 });
+
+test('오프라인에서는 대기하고 온라인 복구 이벤트 직후 다시 요청한다', async () => {
+  const oldDocument = globalThis.document, oldWindow = globalThis.window;
+  class Target {
+    constructor() { this.listeners = {}; }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    removeEventListener(type) { delete this.listeners[type]; }
+    dispatch(type) { this.listeners[type]?.(); }
+  }
+  const documentRef = new Target(); documentRef.visibilityState = 'visible';
+  const windowRef = new Target(); windowRef.navigator = { onLine: false };
+  globalThis.document = documentRef; globalThis.window = windowRef;
+  try {
+    let calls = 0, stop;
+    const started = new Promise(resolve => {
+      const transport = createSupabaseTransport({
+        url: 'https://example.supabase.co', publishableKey: 'public', intervalMs: 100,
+        fetcher: async () => { calls++; resolve(); return response({ trip: { id: 'trip-1' }, version: calls }); }
+      });
+      stop = transport.subscribe('trip-1', 'member-token', () => {}, () => {});
+    });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(calls, 0, 'offline tabs do not make requests');
+    windowRef.navigator.onLine = true; windowRef.dispatch('online');
+    await started;
+    assert.equal(calls, 1, 'online event wakes the subscriber immediately');
+    stop();
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

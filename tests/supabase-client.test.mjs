@@ -82,3 +82,120 @@ test('공통 초대 미리보기만 비로그인 상태로 가능하고 계정 �
  await assert.rejects(transport.request('/account/trips'),error=>error.status===401);
  assert.equal(calls,1);
 });
+
+test('숨긴 탭에서는 조회를 멈추고 다시 표시되면 즉시 최신 스냅샷을 가져온다', async () => {
+  const oldDocument = globalThis.document, oldWindow = globalThis.window;
+  class Target {
+    constructor() { this.listeners = {}; }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    removeEventListener(type) { delete this.listeners[type]; }
+    dispatch(type) { this.listeners[type]?.(); }
+  }
+  const documentRef = new Target(); documentRef.visibilityState = 'visible';
+  const windowRef = new Target(); windowRef.navigator = { onLine: true };
+  globalThis.document = documentRef; globalThis.window = windowRef;
+  try {
+    let calls = 0, stop;
+    const statuses = [], snapshots = [];
+    const received = new Promise(resolve => {
+      const transport = createSupabaseTransport({
+        url: 'https://example.supabase.co', publishableKey: 'public', intervalMs: 100,
+        fetcher: async () => response({ trip: { id: 'trip-1' }, version: ++calls })
+      });
+      stop = transport.subscribe('trip-1', 'member-token', data => {
+        snapshots.push(data.version);
+        if (snapshots.length === 2) resolve();
+      }, status => statuses.push(status));
+    });
+    while (calls < 1) await new Promise(resolve => setTimeout(resolve, 1));
+    documentRef.visibilityState = 'hidden'; documentRef.dispatch('visibilitychange');
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls, 1, 'hidden tabs do not keep polling');
+    documentRef.visibilityState = 'visible'; documentRef.dispatch('visibilitychange');
+    await received;
+    assert.deepEqual(snapshots, [1, 2]);
+    assert.ok(statuses.includes('paused'));
+    stop();
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test('연속 오류는 재시도 간격을 늘리고 복구되면 정상 간격으로 돌아간다', async () => {
+  const times = [];
+  let calls = 0, stop;
+  const recovered = new Promise(resolve => {
+    const transport = createSupabaseTransport({
+      url: 'https://example.supabase.co', publishableKey: 'public', intervalMs: 40,
+      fetcher: async () => {
+        times.push(Date.now());
+        calls++;
+        if (calls <= 2) throw new TypeError('offline');
+        if (calls === 3) return response({ trip: { id: 'trip-1' }, version: 1 });
+        return response({ _status: 401, error: '권한 없음' });
+      }
+    });
+    stop = transport.subscribe('trip-1', 'member-token', () => {}, status => {
+      if (status === 'unauthorized') resolve();
+    });
+  });
+  await recovered;
+  assert.ok(times[1] - times[0] >= 65, 'first retry uses a longer delay');
+  assert.ok(times[2] - times[1] >= 130, 'second retry backs off further');
+  assert.ok(times[3] - times[2] >= 30, 'successful reconnect resumes the short polling cadence');
+  stop();
+});
+
+test('다른 참여자의 동시 수정은 다음 동기화에서 더 높은 버전 스냅샷으로 반영된다', async () => {
+  let calls = 0, stop;
+  const versions = [];
+  const updated = new Promise(resolve => {
+    const transport = createSupabaseTransport({
+      url: 'https://example.supabase.co', publishableKey: 'public', intervalMs: 5,
+      fetcher: async () => response({
+        trip: { id: 'trip-1', title: calls ? '친구의 수정' : '원래 제목' },
+        version: ++calls
+      })
+    });
+    stop = transport.subscribe('trip-1', 'member-token', data => {
+      versions.push([data.version, data.trip.title]);
+      if (versions.length === 2) resolve();
+    }, () => {});
+  });
+  await updated;
+  assert.deepEqual(versions, [[1, '원래 제목'], [2, '친구의 수정']]);
+  stop();
+});
+
+test('오프라인에서는 대기하고 온라인 복구 이벤트 직후 다시 요청한다', async () => {
+  const oldDocument = globalThis.document, oldWindow = globalThis.window;
+  class Target {
+    constructor() { this.listeners = {}; }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    removeEventListener(type) { delete this.listeners[type]; }
+    dispatch(type) { this.listeners[type]?.(); }
+  }
+  const documentRef = new Target(); documentRef.visibilityState = 'visible';
+  const windowRef = new Target(); windowRef.navigator = { onLine: false };
+  globalThis.document = documentRef; globalThis.window = windowRef;
+  try {
+    let calls = 0, stop;
+    const started = new Promise(resolve => {
+      const transport = createSupabaseTransport({
+        url: 'https://example.supabase.co', publishableKey: 'public', intervalMs: 100,
+        fetcher: async () => { calls++; resolve(); return response({ trip: { id: 'trip-1' }, version: calls }); }
+      });
+      stop = transport.subscribe('trip-1', 'member-token', () => {}, () => {});
+    });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(calls, 0, 'offline tabs do not make requests');
+    windowRef.navigator.onLine = true; windowRef.dispatch('online');
+    await started;
+    assert.equal(calls, 1, 'online event wakes the subscriber immediately');
+    stop();
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

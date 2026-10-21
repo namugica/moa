@@ -1,0 +1,5 @@
+.git
+.moa-data
+node_modules
+.env
+.env.*

@@ -22,3 +22,14 @@ test('정산 참여자와 금액 경계값 검증',()=>{
  assert.deepEqual(splitExpense(1,['a','b','c']).map(s=>s.amount),[1,0,0]);
  assert.equal(amount('0'),0);
 });
+
+test('정산 송금 계획의 각 개인 합계가 잔액과 일치하고 원 단위가 보존된다',async()=>{
+ const {settlementPlan}=await import('../model.mjs');
+ const trip={members:[{id:'a'},{id:'b'},{id:'c'}],expenses:[{payerId:'a',amount:10001,shares:splitExpense(10001,['a','b','c'])},{payerId:'b',amount:5000,shares:splitExpense(5000,['b','c'])}]};
+ const plan=settlementPlan(trip);
+ for(const m of balances(trip)){
+  assert.equal(plan.filter(p=>p.to===m.id).reduce((s,p)=>s+p.amount,0)-plan.filter(p=>p.from===m.id).reduce((s,p)=>s+p.amount,0),m.balance);
+ }
+ assert.ok(plan.every(p=>Number.isSafeInteger(p.amount)&&p.amount>0));
+ assert.deepEqual(settlementPlan({...trip,expenses:[]}),[]);
+});

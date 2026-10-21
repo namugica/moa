@@ -2,7 +2,8 @@ export const STATUS = { planning: '계획 중', traveling: '여행 중', finishe
 export const uid = () => crypto.randomUUID();
 export const dayCount = (start, end) => Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
 export function validDates(start, end) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end) && Number.isFinite(dayCount(start, end)) && dayCount(start, end) >= 1;
+  const valid = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+  return valid(start) && valid(end) && dayCount(start, end) >= 1;
 }
 export function amount(value) {
   const n = Number(value);
@@ -23,10 +24,12 @@ export function balances(trip) {
 }
 export const totalCost = trip => trip.expenses.reduce((s, e) => s + e.amount, 0);
 export const plannedCost = trip => trip.items.reduce((s, e) => s + e.estimate, 0);
-export function newTrip({ title, destination, start, end, names }) {
+export function newTrip({ title, destination, start, end, names = '', myName = '나' }) {
   if (!title.trim() || !destination.trim()) throw new Error('여행 이름과 여행지를 입력해 주세요.');
   if (!validDates(start, end)) throw new Error('종료일은 시작일과 같거나 이후여야 합니다.');
-  const members = [...new Set(['나', ...names.split(',').map(n => n.trim()).filter(Boolean)])];
+  if (!myName.trim() || myName.trim().length > 80) throw new Error('내 이름은 1~80자로 입력해 주세요.');
+  const members = [...new Set([myName.trim(), ...names.split(',').map(n => n.trim()).filter(Boolean)])];
+  if (members.some(name => name.length > 80)) throw new Error('멤버 이름은 80자 이내로 입력해 주세요.');
   if (members.length > 20) throw new Error('이번 프로토타입은 최대 20명까지 함께할 수 있어요.');
   return { id: uid(), title: title.trim(), destination: destination.trim(), start, end, status: 'planning', members: members.map(name => ({ id: uid(), name })), items: [], expenses: [] };
 }
@@ -39,4 +42,23 @@ export function demoTrip() {
     { id: uid(), date: trip.start, time: '14:00', place: '한담해안 산책로', category: '관광', estimate: 0, note: '에메랄드빛 바다 따라 걷기', order: 2 }
   ];
   return trip;
+}
+
+// A deterministic plan shared by everyone; the client filters it by its authenticated member ID.
+export function settlementPlan(trip) {
+  const rows = balances(trip);
+  const creditors = rows.filter(m => m.balance > 0).map(m => ({ id: m.id, left: m.balance }));
+  const debtors = rows.filter(m => m.balance < 0).map(m => ({ id: m.id, left: -m.balance }));
+  const transfers = [];
+  let c = 0;
+  for (const debtor of debtors) {
+    while (debtor.left > 0 && c < creditors.length) {
+      const creditor = creditors[c];
+      const value = Math.min(debtor.left, creditor.left);
+      transfers.push({ from: debtor.id, to: creditor.id, amount: value });
+      debtor.left -= value; creditor.left -= value;
+      if (!creditor.left) c++;
+    }
+  }
+  return transfers;
 }

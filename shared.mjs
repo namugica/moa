@@ -1,6 +1,7 @@
 import { API_BASE, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.mjs';
+import { auth } from './account.mjs';
 import { createSupabaseTransport } from './supabase-client.mjs';
-const supabase = SUPABASE_URL ? createSupabaseTransport({ url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY }) : null;
+const supabase = SUPABASE_URL ? createSupabaseTransport({ url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY, getAccessToken: () => auth.getAccessToken() }) : null;
 export const CONNECTION_LABEL = supabase ? '자동 동기화 · 2초마다' : '실시간 연결됨';
 const base = API_BASE.replace(/\/$/, '');
 export const SESSION_KEY = `moa.shared.v1:${SUPABASE_URL || base || location.origin}`;
@@ -23,8 +24,8 @@ export async function request(path, { token, method = 'GET', data, signal, strea
   if (!response.ok) throw Object.assign(new Error(result.error || '요청을 처리하지 못했어요.'), { status: response.status, snapshot: result.trip ? result : null });
   return result;
 }
-export function subscribe(tripId, token, onSnapshot, onConnection) {
-  if (supabase) return supabase.subscribe(tripId, token, onSnapshot, onConnection);
+export function subscribe(tripId, token, onSnapshot, onConnection, account = false) {
+  if (supabase) return supabase.subscribe(tripId, token, onSnapshot, onConnection, account);
   const controller = new AbortController();
   (async () => {
     while (!controller.signal.aborted) {

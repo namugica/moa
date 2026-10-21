@@ -170,7 +170,7 @@ export function createMoaServer({ dataDir = process.env.MOA_DATA_DIR || join(roo
         fail(405, '지원하지 않는 요청이에요.');
       }
       if (path.startsWith('/api/')) fail(404, '요청한 기능을 찾을 수 없어요.');
-      const files = { '/': ['index.html','text/html'], '/index.html': ['index.html','text/html'], '/app.mjs': ['app.mjs','text/javascript'], '/shared.mjs': ['shared.mjs','text/javascript'], '/config.mjs': ['config.mjs','text/javascript'], '/supabase-client.mjs': ['supabase-client.mjs','text/javascript'], '/model.mjs': ['model.mjs','text/javascript'], '/styles.css': ['styles.css','text/css'], '/assets/travel.svg': ['assets/travel.svg','image/svg+xml'] };
+      const files = { '/': ['index.html','text/html'], '/index.html': ['index.html','text/html'], '/app.mjs': ['app.mjs','text/javascript'], '/auth.mjs': ['auth.mjs','text/javascript'], '/account.mjs': ['account.mjs','text/javascript'], '/shared.mjs': ['shared.mjs','text/javascript'], '/config.mjs': ['config.mjs','text/javascript'], '/supabase-client.mjs': ['supabase-client.mjs','text/javascript'], '/model.mjs': ['model.mjs','text/javascript'], '/styles.css': ['styles.css','text/css'], '/assets/travel.svg': ['assets/travel.svg','image/svg+xml'] };
       if (!files[path] || !['GET','HEAD'].includes(req.method)) fail(404, '페이지를 찾을 수 없어요.');
       const [file, type] = files[path];
       const content = readFileSync(join(root, file));

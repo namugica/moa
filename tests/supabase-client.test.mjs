@@ -52,11 +52,33 @@ test('자동 동기화는 연결 실패 후 회복하고 권한 거절 시 재�
 });
 
 test('페이지 이동으로 취소한 요청은 나중에 완료되어도 화면을 갱신하지 않는다', async () => {
-  let resolveFetch;
+  let resolveFetch, started;
+  const fetched=new Promise(resolve=>{started=resolve;});
   const updated=[];
-  const transport=createSupabaseTransport({url:'https://example.supabase.co',publishableKey:'public',fetcher:()=>new Promise(resolve=>{resolveFetch=resolve;})});
+  const transport=createSupabaseTransport({url:'https://example.supabase.co',publishableKey:'public',fetcher:()=>new Promise(resolve=>{resolveFetch=resolve;started();})});
   const stop=transport.subscribe('trip-1','member-token',data=>updated.push(data),status=>updated.push(status));
-  stop();resolveFetch(response({trip:{id:'trip-1'},version:1}));
+  await fetched;stop();resolveFetch(response({trip:{id:'trip-1'},version:1}));
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.deepEqual(updated,[]);
+});
+
+test('계정 API는 검증할 JWT를 헤더로 보내고 계정용 RPC로 요청한다',async()=>{
+ const calls=[];
+ const transport=createSupabaseTransport({url:'https://example.supabase.co',publishableKey:'sb_publishable_test',getAccessToken:async()=>'user-jwt',fetcher:async(url,options)=>{calls.push({url,...options,body:JSON.parse(options.body)});return response({ok:true});}});
+ await transport.request('/account/profile');
+ await transport.request('/account/trips');
+ await transport.request('/account/trips/room-1/invites',{method:'POST'});
+ await transport.request('/account/adopt',{method:'POST',data:{tripId:'room-1',token:'old-member-capability'}});
+ assert.deepEqual(calls.map(c=>c.body.action),['profile','list','invite','adopt']);
+ for(const call of calls){assert.ok(call.url.endsWith('/moa_account_api'));assert.equal(call.headers.Authorization,'Bearer user-jwt');assert.equal(call.headers.apikey,'sb_publishable_test');}
+ assert.equal(calls[3].body.payload.token,'old-member-capability');
+ assert.equal(calls[3].body.trip_id,'room-1');
+});
+
+test('공통 초대 미리보기만 비로그인 상태로 가능하고 계정 요청은 로그인 필요',async()=>{
+ let calls=0;
+ const transport=createSupabaseTransport({url:'https://example.supabase.co',publishableKey:'public',fetcher:async()=>{calls++;return response({title:'여행',common:true});}});
+ assert.equal((await transport.request('/account/invites/common-token')).common,true);
+ await assert.rejects(transport.request('/account/trips'),error=>error.status===401);
+ assert.equal(calls,1);
 });

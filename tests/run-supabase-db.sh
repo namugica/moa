@@ -17,4 +17,8 @@ docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supab
 # Reapply to check that existing data/schema are preserved.
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/setup.sql
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/tests.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < tests/auth-db-fixture.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth-tests.sql
 if [ "${MOA_BROWSER_TEST:-0}" = 1 ]; then python3 tests/supabase-browser-smoke.py; fi

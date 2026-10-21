@@ -1,4 +1,5 @@
 import { STATUS, uid, dayCount, amount, splitExpense, balances, totalCost, plannedCost, newTrip, demoTrip, settlementPlan } from './model.mjs';
+import { auth } from './account.mjs';
 import { SESSION_KEY, request, subscribe, CONNECTION_LABEL } from './shared.mjs';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -8,6 +9,9 @@ const KEY = 'moa.prototype.v1';
 let state = { trips: [] }, storageBlocked = false, activeSubmit, activeVersion, toastTimer;
 let sessions = {}, stopStream, streamingId, inviteInfo, inviteError = '', submitting = false;
 const connectionStatus = {};
+let authUser = null, currentProfile = null, accountEpoch = 0;
+const AVATARS = ['🌿','🐻','🐱','🐶','🐰','🦊','🐼','🐧'];
+const tripPath = t => `${sessions[t.id]?.account ? '/account' : ''}/trips/${t.id}`;
 try {
   const raw = localStorage.getItem(KEY);
   if (raw) {
@@ -18,12 +22,12 @@ try {
 } catch { storageBlocked = true; }
 try { sessions = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}'); } catch { storageBlocked = true; }
 function persist() {
-  localStorage.setItem(KEY, JSON.stringify(state));
-  localStorage.setItem(SESSION_KEY, JSON.stringify(sessions));
+  localStorage.setItem(KEY, JSON.stringify({ trips: state.trips.filter(t => !sessions[t.id]?.account) }));
+  localStorage.setItem(SESSION_KEY, JSON.stringify(Object.fromEntries(Object.entries(sessions).filter(([,s]) => !s.account))));
 }
 function acceptSnapshot(data) {
   const session = sessions[data.trip.id];
-  if (!session || data.version < (session.version || 0)) return;
+  if (!session || (session.account && session.userId !== authUser?.id) || data.version < (session.version || 0)) return;
   const changed = data.version !== session.version || JSON.stringify(data.claimedIds) !== JSON.stringify(session.claimedIds) || !state.trips.some(t => t.id === data.trip.id);
   Object.assign(session, { version: data.version, memberId: data.memberId, ownerId: data.ownerId, claimedIds: data.claimedIds });
   const index = state.trips.findIndex(t => t.id === data.trip.id);
@@ -33,13 +37,14 @@ function acceptSnapshot(data) {
 }
 function watchTrip() {
   const t = currentTrip(), session = t && sessions[t.id];
-  if (streamingId === (session ? t.id : undefined)) return;
-  stopStream?.(); stopStream = undefined; streamingId = session ? t.id : undefined;
+  const streamKey = session ? `${t.id}:${session.account ? authUser?.id : 'legacy'}` : undefined;
+  if (streamingId === streamKey) return;
+  stopStream?.(); stopStream = undefined; streamingId = streamKey;
   if (session) stopStream = subscribe(t.id, session.token, acceptSnapshot, status => {
     connectionStatus[t.id] = status;
     const label = $('#sync-status');
     if (label && currentTrip()?.id === t.id) { label.textContent = syncLabel(t); $('.profile small').textContent = syncLabel(t); }
-  });
+  }, Boolean(session.account));
 }
 function syncLabel(t) {
   if (!sessions[t.id]) return '이 브라우저에 저장 중';
@@ -52,10 +57,10 @@ async function update(fn) {
   const shared = next.trips.find(t => sessions[t.id] && JSON.stringify(t) !== JSON.stringify(state.trips.find(old => old.id === t.id)));
   if (shared) {
     const session = sessions[shared.id];
-    try { acceptSnapshot(await request(`/trips/${shared.id}`, { token: session.token, method: 'PATCH', data: { trip: shared, version: $('#editor').open ? activeVersion : session.version } })); return true; }
+    try { acceptSnapshot(await request(tripPath(shared), { token: session.token, method: 'PATCH', data: { trip: shared, version: $('#editor').open ? activeVersion : session.version } })); return true; }
     catch (error) { if (error.snapshot) { acceptSnapshot(error.snapshot); activeVersion = error.snapshot.version; } throw error; }
   }
-  try { localStorage.setItem(KEY, JSON.stringify(next)); state = next; render(); return true; }
+  try { state = next; persist(); render(); return true; }
   catch { throw new Error('저장하지 못했어요. 브라우저 저장 공간과 권한을 확인해 주세요.'); }
 }
 const tripById = id => state.trips.find(t => t.id === id);
@@ -74,20 +79,54 @@ function mySettlement(t) {
   const name = id => esc(t.members.find(m => m.id === id)?.name);
   return `<section class="panel personal-settlement"><span class="eyebrow">${esc(me.name)}님의 정산</span><h2>나의 정산</h2><div class="personal-amount" data-personal-balance="${me.balance}">${me.balance > 0 ? '받을 돈' : me.balance < 0 ? '보낼 돈' : '정산 균형'} <strong>${money(Math.abs(me.balance))}</strong></div><div class="summary-row"><span>내가 결제한 금액</span><strong>${money(me.paid)}</strong></div><div class="summary-row"><span>내가 부담한 금액</span><strong>${money(me.share)}</strong></div>${transfers.map(p => `<p class="transfer">${p.from === me.id ? `${name(p.to)}님에게 보낼 돈` : `${name(p.from)}님에게 받을 돈`} <strong>${money(p.amount)}</strong></p>`).join('')}<p class="help">공통 지출은 모두 같고, 이 정산은 내 멤버 기준이에요. 실제 송금 완료를 뜻하지 않아요.</p></section>`;
 }
+function loginButtons() {
+  return `<div class="login-buttons">${btn('login-kakao','카카오로 계속하기','','button kakao')}${btn('login-google','구글로 계속하기','','button google')}</div>`;
+}
+function loginForm() {
+  if (!auth) return toast('로그인은 공유 서비스를 연결한 환경에서 사용할 수 있어요.');
+  open('친구와 함께 여행하기', `<p>로그인하면 다른 기기에서도 같은 프로필과 여행을 이어갈 수 있어요.</p>${loginButtons()}<p class="help">초대받은 여행은 로그인 후에도 그대로 이어져요.</p>`, () => false);
+  $('#editor-form [type="submit"]').hidden = true;
+}
+function acceptAccountSnapshot(data, userId = authUser?.id) {
+  if (!userId || authUser?.id !== userId) return;
+  sessions[data.trip.id] = { ...sessions[data.trip.id], account: true, userId };
+  delete sessions[data.trip.id].token;
+  acceptSnapshot(data); watchTrip();
+}
+async function loadAccountData() {
+  const epoch = accountEpoch, userId = authUser?.id;
+  if (!userId) return;
+  const [profile, trips] = await Promise.all([request('/account/profile'), request('/account/trips')]);
+  if (epoch !== accountEpoch || authUser?.id !== userId) return;
+  currentProfile = profile.profile;
+  for (const data of trips.trips) acceptAccountSnapshot(data, userId);
+  render(); watchTrip();
+  if (!currentProfile && !$('#editor').open) profileForm();
+}
+function profileForm() {
+  if (!authUser) return loginForm();
+  const initialName = currentProfile?.name || authUser.user_metadata?.full_name || authUser.user_metadata?.name || '';
+  open('내 프로필 설정', `${input('친구들에게 표시할 이름','profileName',initialName,'text','required maxlength="80"')}<label for="f-avatar">프로필 아이콘</label><select id="f-avatar" name="avatar">${AVATARS.map(icon => `<option ${currentProfile?.avatar === icon ? 'selected' : ''}>${icon}</option>`).join('')}</select><p class="help">이 프로필은 로그인한 계정에 저장돼요. 이름을 변경해도 정산 기록은 유지돼요.</p>${btn('logout','로그아웃','','button secondary')}`, async data => {
+    const userId = authUser.id;
+    const saved = await request('/account/profile', { method:'PUT', data:{ name:data.get('profileName').trim(), avatar:data.get('avatar') } });
+    if (authUser?.id !== userId) return false;
+    currentProfile = saved.profile; await loadAccountData(); render(); return true;
+  });
+}
 function invitationView() {
   if (inviteError) return `<section class="panel"><h1>초대를 확인해 주세요</h1><p role="alert">${esc(inviteError)}</p><a class="button secondary" href="#home">홈으로</a></section>`;
   if (!inviteInfo) return '<section class="panel"><p role="status">초대를 확인하고 있어요…</p></section>';
-  return `<section class="panel invite-landing"><span class="eyebrow">함께하는 여행</span><h1>${esc(inviteInfo.title)}</h1><p><strong>${esc(inviteInfo.memberName)}</strong>님으로 초대받았어요.</p><p>같은 일정과 지출을 함께 편집하고, 나의 정산을 확인할 수 있어요.</p>${btn('join-trip','초대 수락하고 참여하기')}<p class="help">본인에게 온 링크인지 확인해 주세요. 한 번만 사용할 수 있으며, 참여 정보는 이 브라우저에 보관돼요.</p></section>`;
+  return `<section class="panel invite-landing"><span class="eyebrow">함께하는 여행</span><h1>${esc(inviteInfo.title)}</h1><p>${inviteInfo.common ? '하나의 링크로 친구들과 함께하는 여행이에요.' : `<strong>${esc(inviteInfo.memberName)}</strong>님에게 온 초대예요.`}</p><p>같은 일정과 지출을 함께 편집하고, 나의 정산을 확인할 수 있어요.</p>${!auth ? btn('join-trip','초대 수락하고 참여하기') : !authUser ? loginButtons() : !currentProfile ? btn('profile','내 프로필 설정하고 참여하기') : `<p>${esc(currentProfile.avatar)} ${esc(currentProfile.name)}님으로 참여해요.</p>${btn('join-trip','초대 수락하고 참여하기')}`}<p class="help">${inviteInfo.common ? '친구들이 같은 링크로 각자의 계정으로 참여해요.' : '기존 개별 초대를 수락하면 해당 멤버가 내 계정과 연결돼요.'} 다른 기기에서도 같은 계정으로 여행을 이어갈 수 있어요.</p></section>`;
 }
 async function loadInvitation() {
   const value = location.hash.startsWith('#invite/') ? location.hash.slice(8) : null;
   if (!value) return;
   inviteInfo = undefined; inviteError = ''; render();
-  try { const info = await request(`/invites/${encodeURIComponent(value)}`); if (location.hash === `#invite/${value}`) inviteInfo = info; }
+  try { const info = await request(`${auth ? '/account' : ''}/invites/${encodeURIComponent(value)}`); if (location.hash === `#invite/${value}`) inviteInfo = info; }
   catch (error) { if (location.hash === `#invite/${value}`) inviteError = error.message; }
   if (location.hash === `#invite/${value}`) render();
 }
-function inviteForm(t) {
+function legacyInviteForm(t) {
   if (storageBlocked) return toast('브라우저 저장소를 먼저 사용할 수 있어야 초대할 수 있어요.');
   const session = sessions[t.id];
   const candidates = t.members.filter(m => m.id !== (session?.memberId || t.members[0].id) && !session?.claimedIds?.includes(m.id));
@@ -117,24 +156,52 @@ function inviteForm(t) {
     return false;
   });
 }
+function showInviteLink(result) {
+  const link = new URL(location.href); link.search = ''; link.hash = `invite/${result.inviteToken}`;
+  $('#dialog-title').textContent = '모두에게 보낼 초대 링크';
+  $('#dialog-fields').innerHTML = `${input('친구들에게 보낼 링크','inviteLink',link.href,'text','readonly')}<div class="actions">${btn('copy-invite','링크 복사')}${navigator.share ? btn('share-invite','친구에게 보내기','','button secondary') : ''}</div><p id="copy-status" role="status"></p><p class="help">친구들이 이 링크로 로그인하고 자기 프로필로 참여해요. ${new Date(result.expiresAt).toLocaleString('ko-KR')}까지 사용할 수 있어요.</p>`;
+  activeSubmit = () => false; $('#editor-form [type="submit"]').hidden = true;
+}
+function inviteForm(t) {
+  if (!auth) return legacyInviteForm(t);
+  if (!authUser) return loginForm();
+  if (!currentProfile) return profileForm();
+  if (storageBlocked) return toast('브라우저 저장소를 사용할 수 있어야 해요.');
+  open('친구들을 여행에 초대하기', '<p>단체 채팅방에 초대 링크 하나를 보내 주세요. 친구들은 카카오 또는 구글로 로그인하고 자신의 프로필로 참여해요.</p><p class="help">링크는 7일 동안 유효해요. 다시 열어도 같은 유효한 링크를 보여드려요. 새 친구는 이전 지출에 자동 추가되지 않아요.</p>', async () => {
+    const userId = authUser.id;
+    if (!sessions[t.id]) {
+      const created = await request('/account/trips', { method:'POST', data:{trip:t} });
+      if (authUser?.id !== userId) return false;
+      state.trips = state.trips.filter(old => old.id !== t.id);
+      acceptAccountSnapshot(created, userId); t = created.trip; location.hash = `trip/${t.id}`;
+    } else if (!sessions[t.id].account) {
+      const adopted = await request('/account/adopt', { method:'POST', data:{tripId:t.id,token:sessions[t.id].token} });
+      acceptAccountSnapshot(adopted, userId);
+    }
+    const result = await request(`${tripPath(t)}/invites`, { method:'POST', data:{} });
+    if (authUser?.id !== userId) return false;
+    acceptAccountSnapshot(result, userId); showInviteLink(result); return false;
+  });
+}
 function tripView(t) {
   const days = [...new Set(t.items.map(i=>i.date))].sort();
-  return `<a class="back" href="#trips">← 나의 여행으로</a><section class="trip-head"><span class="badge ${t.status}">${STATUS[t.status]}${t.demo ? ' · 예시 데이터' : ''}</span><div class="heading-row"><div><h1>${esc(t.title)}</h1><p>${esc(t.destination)} &nbsp; ${date(t.start)} — ${date(t.end)}</p></div><div class="actions">${!sessions[t.id] || sessions[t.id].memberId === sessions[t.id].ownerId ? btn('invite','친구 초대','','button secondary') : ''}${t.status === 'planning' ? btn('start','여행 시작하기 ↗') : t.status === 'traveling' ? btn('finish','여행 종료하기') : '<span class="muted">잘 다녀왔어요. 기록을 정리해 볼까요?</span>'}</div></div><div class="members">${t.members.map(m=>`<span class="member" title="${sessions[t.id]?.claimedIds?.includes(m.id) ? '참여 완료' : '초대 전'}">${esc(m.name)}${m.id === (sessions[t.id]?.memberId || t.members[0].id) ? ' · 나' : ''}</span>`).join('')}<span class="help">${t.members.length}명이 함께해요</span><span id="sync-status" class="sync-status" role="status">${syncLabel(t)}</span></div></section><div class="detail-grid"><div><section class="panel"><div class="section-title"><h2>우리의 여행 타임라인</h2>${btn('create-item','＋ 일정 추가','','button ghost')}</div>${days.length ? days.map(d=> { const list = t.items.filter(i=>i.date===d).sort((a,b)=>a.order-b.order); return `<div class="day-label"><strong>DAY ${dayCount(t.start,d)}</strong>${date(d)}</div>${list.map((i,index)=>itemView(t,i,index,list.length)).join('')}`; }).join('') : '<div class="empty">아직 모아둔 일정이 없어요.<br>첫 번째 가고 싶은 곳을 추가해 보세요.</div>'}</section><section class="panel"><div class="section-title"><h2>함께 쓴 여행 경비</h2>${btn('create-expense','＋ 지출 기록','','button ghost')}</div>${t.expenses.length ? t.expenses.map(e=>`<article class="expense-row"><div class="item-top"><strong>${esc(e.title)}</strong><span>${money(e.amount)} ${btn('edit-expense','수정',e.id,'icon-button')}${btn('delete-expense','삭제',e.id,'icon-button')}</span></div><small>${esc(t.members.find(m=>m.id===e.payerId)?.name)} 결제 · ${e.shares.map(s=>esc(t.members.find(m=>m.id===s.memberId)?.name)).join(', ')} 함께 사용${e.itemId ? ' · '+esc(t.items.find(i=>i.id===e.itemId)?.place) : ''}</small></article>`).join('') : '<p class="empty">갑자기 탄 택시도, 함께 먹은 점심도.<br>작은 지출부터 모아보세요.</p>'}</section></div><aside class="summary-panel">${mySettlement(t)}<section class="panel"><span class="eyebrow">Our travel wallet</span><h2 style="margin-top:12px">지금까지 모은 경비</h2><div class="summary-total">${money(totalCost(t))}</div><div class="summary-row"><span class="muted">예상 일정 비용</span><strong>${money(plannedCost(t))}</strong></div><div class="summary-row"><span class="muted">지출 기록</span><strong>${t.expenses.length}건</strong></div>${btn('create-expense','＋ 지출 기록하기','','button full')}<p class="help">모든 금액은 원화(KRW) 기준입니다.<br>실제 지출이 예상 비용을 자동으로 대체하지 않아요.</p></section><section class="panel"><h3>투명한 나눔</h3><p class="help">지출별 참여자끼리 나눈 예상 정산 내역이에요. 공유 여행에서는 친구와 같은 내역을 봐요. 실제 송금 기능은 포함되지 않습니다.</p>${balances(t).map(m=>`<details class="balance"><summary>${esc(m.name)}<strong>${m.balance>0?'받을 돈':m.balance<0?'보낼 돈':'정산 균형'} ${money(Math.abs(m.balance))}</strong></summary><p>대신 결제 ${money(m.paid)}<br>나의 부담 ${money(m.share)}</p>${t.expenses.filter(e=>e.shares.some(s=>s.memberId===m.id)).map(e=>`<div class="summary-row"><span>${esc(e.title)}</span><span>${money(e.shares.find(s=>s.memberId===m.id).amount)}</span></div>`).join('')}</details>`).join('')}<p class="help">나누어떨어지지 않는 1원은 선택한 멤버 순서대로 배분해요.</p></section></aside></div>`;
+  return `<a class="back" href="#trips">← 나의 여행으로</a><section class="trip-head"><span class="badge ${t.status}">${STATUS[t.status]}${t.demo ? ' · 예시 데이터' : ''}</span><div class="heading-row"><div><h1>${esc(t.title)}</h1><p>${esc(t.destination)} &nbsp; ${date(t.start)} — ${date(t.end)}</p></div><div class="actions">${!sessions[t.id] || sessions[t.id].memberId === sessions[t.id].ownerId ? btn('invite','친구 초대','','button secondary') : ''}${t.status === 'planning' ? btn('start','여행 시작하기 ↗') : t.status === 'traveling' ? btn('finish','여행 종료하기') : '<span class="muted">잘 다녀왔어요. 기록을 정리해 볼까요?</span>'}</div></div><div class="members">${t.members.map(m=>`<span class="member" title="${sessions[t.id]?.claimedIds?.includes(m.id) ? '참여 완료' : '초대 전'}">${esc(m.avatar || '')} ${esc(m.name)}${m.id === (sessions[t.id]?.memberId || t.members[0].id) ? ' · 나' : ''}</span>`).join('')}<span class="help">${t.members.length}명이 함께해요</span><span id="sync-status" class="sync-status" role="status">${syncLabel(t)}</span></div></section><div class="detail-grid"><div><section class="panel"><div class="section-title"><h2>우리의 여행 타임라인</h2>${btn('create-item','＋ 일정 추가','','button ghost')}</div>${days.length ? days.map(d=> { const list = t.items.filter(i=>i.date===d).sort((a,b)=>a.order-b.order); return `<div class="day-label"><strong>DAY ${dayCount(t.start,d)}</strong>${date(d)}</div>${list.map((i,index)=>itemView(t,i,index,list.length)).join('')}`; }).join('') : '<div class="empty">아직 모아둔 일정이 없어요.<br>첫 번째 가고 싶은 곳을 추가해 보세요.</div>'}</section><section class="panel"><div class="section-title"><h2>함께 쓴 여행 경비</h2>${btn('create-expense','＋ 지출 기록','','button ghost')}</div>${t.expenses.length ? t.expenses.map(e=>`<article class="expense-row"><div class="item-top"><strong>${esc(e.title)}</strong><span>${money(e.amount)} ${btn('edit-expense','수정',e.id,'icon-button')}${btn('delete-expense','삭제',e.id,'icon-button')}</span></div><small>${esc(t.members.find(m=>m.id===e.payerId)?.name)} 결제 · ${e.shares.map(s=>esc(t.members.find(m=>m.id===s.memberId)?.name)).join(', ')} 함께 사용${e.itemId ? ' · '+esc(t.items.find(i=>i.id===e.itemId)?.place) : ''}</small></article>`).join('') : '<p class="empty">갑자기 탄 택시도, 함께 먹은 점심도.<br>작은 지출부터 모아보세요.</p>'}</section></div><aside class="summary-panel">${mySettlement(t)}<section class="panel"><span class="eyebrow">Our travel wallet</span><h2 style="margin-top:12px">지금까지 모은 경비</h2><div class="summary-total">${money(totalCost(t))}</div><div class="summary-row"><span class="muted">예상 일정 비용</span><strong>${money(plannedCost(t))}</strong></div><div class="summary-row"><span class="muted">지출 기록</span><strong>${t.expenses.length}건</strong></div>${btn('create-expense','＋ 지출 기록하기','','button full')}<p class="help">모든 금액은 원화(KRW) 기준입니다.<br>실제 지출이 예상 비용을 자동으로 대체하지 않아요.</p></section><section class="panel"><h3>투명한 나눔</h3><p class="help">지출별 참여자끼리 나눈 예상 정산 내역이에요. 공유 여행에서는 친구와 같은 내역을 봐요. 실제 송금 기능은 포함되지 않습니다.</p>${balances(t).map(m=>`<details class="balance"><summary>${esc(m.avatar || '')} ${esc(m.name)}<strong>${m.balance>0?'받을 돈':m.balance<0?'보낼 돈':'정산 균형'} ${money(Math.abs(m.balance))}</strong></summary><p>대신 결제 ${money(m.paid)}<br>나의 부담 ${money(m.share)}</p>${t.expenses.filter(e=>e.shares.some(s=>s.memberId===m.id)).map(e=>`<div class="summary-row"><span>${esc(e.title)}</span><span>${money(e.shares.find(s=>s.memberId===m.id).amount)}</span></div>`).join('')}</details>`).join('')}<p class="help">나누어떨어지지 않는 1원은 선택한 멤버 순서대로 배분해요.</p></section></aside></div>`;
 }
-function guide() { return `<div class="heading-row"><div><h1>가벼운 여행을 위한 MOA 가이드</h1><p>우리가 함께 모으는 것은 경비 그 이상의 순간이에요.</p></div></div><div class="guide-grid">${[['01 · 계획을 모아요','여행을 만들고 함께 갈 사람의 이름을 입력해요. 일정을 추가하고 위아래 화살표로 같은 날짜 안의 순서를 바꿀 수 있어요.'],['02 · 순간을 기록해요','여행 시작 버튼을 누르고 실제 지출을 기록해요. 결제한 사람과 함께 쓴 사람을 각각 선택할 수 있어요.'],['03 · 투명하게 나눠요','각자의 부담액과 대신 결제한 돈을 비교해요. 투명한 나눔에서 이름을 누르면 계산 과정을 확인할 수 있어요.'],['04 · 친구와 함께해요','여행의 친구 초대에서 친구별 링크를 만들어요. 친구가 수락하면 일정과 지출이 실시간으로 연결되고 나의 정산은 각자 다르게 보여요. 공유 전 여행은 브라우저에, 공유 여행은 서버에도 저장돼요.']].map(([h,p])=>`<section class="panel"><h2>${h}</h2><p>${p}</p></section>`).join('')}</div><section class="panel"><h2>내 기록 보관하기</h2><p class="help">브라우저 데이터를 삭제하면 개인 기록과 공유 여행 참여 정보에 접근할 수 없게 돼요. 필요할 때 JSON 파일로 내려받아 보관하세요. 현재 버전은 가져오기를 지원하지 않아요.</p>${btn('export','여행 데이터 내보내기','','button secondary')}</section>`; }
+function guide() { return `<div class="heading-row"><div><h1>가벼운 여행을 위한 MOA 가이드</h1><p>우리가 함께 모으는 것은 경비 그 이상의 순간이에요.</p></div></div><div class="guide-grid">${[['01 · 계획을 모아요','여행을 만들고 함께 갈 사람의 이름을 입력해요. 일정을 추가하고 위아래 화살표로 같은 날짜 안의 순서를 바꿀 수 있어요.'],['02 · 순간을 기록해요','여행 시작 버튼을 누르고 실제 지출을 기록해요. 결제한 사람과 함께 쓴 사람을 각각 선택할 수 있어요.'],['03 · 투명하게 나눠요','각자의 부담액과 대신 결제한 돈을 비교해요. 투명한 나눔에서 이름을 누르면 계산 과정을 확인할 수 있어요.'],['04 · 친구와 함께해요','여행의 친구 초대에서 공통 초대 링크를 만들어요. 친구가 로그인하고 자기 프로필로 참여하면 일정과 지출이 실시간으로 연결되고 나의 정산은 각자 다르게 보여요. 공유 전 여행은 브라우저에, 공유 여행은 서버에도 저장돼요.']].map(([h,p])=>`<section class="panel"><h2>${h}</h2><p>${p}</p></section>`).join('')}</div><section class="panel"><h2>내 기록 보관하기</h2><p class="help">브라우저 데이터를 삭제하면 개인 기록과 공유 여행 참여 정보에 접근할 수 없게 돼요. 필요할 때 JSON 파일로 내려받아 보관하세요. 현재 버전은 가져오기를 지원하지 않아요.</p>${btn('export','여행 데이터 내보내기','','button secondary')}</section>`; }
 function render() {
   const route = location.hash.slice(1).split('/')[0] || 'home';
   document.querySelectorAll('[data-nav]').forEach(a=>{ const active = a.dataset.nav === (route==='trip'?'trips':route); a.classList.toggle('active',active); if(active) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current'); });
   $('#breadcrumb').textContent = route==='trip'?'나의 여행 / 타임라인':route==='guide'?'MOA 사용 가이드':'나의 여행 대시보드';
   const t = currentTrip();
+  $('#auth-controls').innerHTML = !auth ? '' : authUser ? btn('profile', `${esc(currentProfile?.avatar || '🌿')} ${esc(currentProfile?.name || '내 프로필')}`, '', 'button secondary') : btn('login','로그인','','button secondary');
   const me = t?.members.find(m => m.id === (sessions[t.id]?.memberId || t.members[0].id));
-  $('.profile strong').textContent = me ? `${me.name}님` : '여행자님';
+  $('.profile strong').textContent = currentProfile ? `${currentProfile.name}님` : me ? `${me.name}님` : '여행자님';
   $('.profile small').textContent = t ? syncLabel(t) : '나의 여행 파트너';
   $('#main').innerHTML = (storageBlocked?'<div class="warning">저장된 데이터를 읽을 수 없어요. 기존 기록 보호를 위해 변경을 중단했습니다. 브라우저 저장소 설정을 확인해 주세요.</div>':'') + (route==='invite' ? invitationView() : route==='trip' ? (t?tripView(t):'<div class="empty">이 여행을 찾을 수 없어요.<br><a href="#home">홈으로 돌아가기</a></div>') : route==='guide'?guide():home(route==='trips'));
 }
 function open(title, fields, submit) { activeVersion = sessions[currentTrip()?.id]?.version; $('#editor-form [type="submit"]').hidden = false; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#form-error').textContent=''; activeSubmit=submit; $('#editor').showModal(); }
 function input(label,name,value='',type='text',extra='') { return `<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`; }
-function tripForm() { open('새로운 여행 시작하기', `${input('내 이름','myName','','text','required maxlength="80" placeholder="친구들에게 표시할 이름"')}${input('여행 이름','title','','text','required maxlength="80" placeholder="예: 우리의 느긋한 제주"')}${input('여행지','destination','','text','required maxlength="80" placeholder="예: 제주, 대한민국"')}<div class="field-row"><div>${input('시작일','start','','date','required')}</div><div>${input('종료일','end','','date','required')}</div></div>${input('함께 가는 사람 (선택)','names','','text','maxlength="400" placeholder="민지, 수현 — 쉼표로 구분해 주세요"')}<p class="help">내 이름은 자동으로 포함돼요. 친구 초대는 여행을 만든 후 보낼 수 있어요.</p>`, async data=>{ const t=newTrip(Object.fromEntries(data)); if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`; return true;} }); }
+function tripForm() { open('새로운 여행 시작하기', `${input('내 이름','myName',currentProfile?.name || '','text','required maxlength="80" placeholder="친구들에게 표시할 이름"'+(authUser ? ' readonly' : ''))}${input('여행 이름','title','','text','required maxlength="80" placeholder="예: 우리의 느긋한 제주"')}${input('여행지','destination','','text','required maxlength="80" placeholder="예: 제주, 대한민국"')}<div class="field-row"><div>${input('시작일','start','','date','required')}</div><div>${input('종료일','end','','date','required')}</div></div>${authUser ? '<p class="help">친구들은 여행을 만든 후 공통 초대 링크로 참여해요.</p>' : input('함께 가는 사람 (선택)','names','','text','maxlength="400" placeholder="민지, 수현 — 쉼표로 구분해 주세요"')}<p class="help">내 이름은 자동으로 포함돼요. 친구 초대는 여행을 만든 후 보낼 수 있어요.</p>`, async data=>{ const t=newTrip(Object.fromEntries(data)); if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;} if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`; return true;} }); }
 function itemForm(t,id) {
   const old=t.items.find(i=>i.id===id);
   open(old?'일정 수정하기':'설레는 일정 추가하기',`${input('장소 이름','place',old?.place,'text','required maxlength="100"') }<div class="field-row"><div>${input('방문 날짜','date',old?.date||t.start,'date',`required min="${t.start}" max="${t.end}"`)}</div><div>${input('시간 (선택)','time',old?.time||'','time')}</div></div><label for="f-category">카테고리</label><select id="f-category" name="category">${['관광','맛집','카페','이동','숙소','기타'].map(v=>`<option ${old?.category===v?'selected':''}>${v}</option>`).join('')}</select>${input('예상 비용 (원)','estimate',old?.estimate??0,'number','required min="0" max="1000000000" step="1"')}<label for="f-note">메모</label><textarea id="f-note" name="note" maxlength="1000">${esc(old?.note||'')}</textarea>`,data=>{
@@ -156,6 +223,15 @@ document.addEventListener('click',async e=>{
   if(e.target.closest('[data-close]')) { if (submitting) return; $('#editor').close(); return; }
   const control=e.target.closest('[data-action]'); if(!control)return;
   const {action,id}=control.dataset; const t=currentTrip();
+  if(action==='login') return loginForm();
+  if(action==='profile') return profileForm();
+  if(action==='login-kakao'||action==='login-google') {
+    control.disabled=true;
+    try { await auth.signIn(action.slice(6)); }
+    catch(error) { control.disabled=false; throw error; }
+    return;
+  }
+  if(action==='logout') { $('#editor').close(); location.hash='home'; await auth.signOut(); toast('로그아웃했어요.'); return; }
   if(action==='share-invite') {
     try { await navigator.share({ title: 'MOA 여행 초대', text: '우리의 여행을 함께 기록해요.', url: $('[name="inviteLink"]').value }); }
     catch(error) { if (error.name !== 'AbortError') toast('공유하지 못했어요. 링크 복사를 이용해 주세요.'); }
@@ -172,8 +248,10 @@ document.addEventListener('click',async e=>{
     control.disabled = true;
     try {
       const value = location.hash.slice(8);
-      const joined = await request(`/invites/${encodeURIComponent(value)}/join`, { method: 'POST', data: {} });
-      sessions[joined.trip.id] = { token: joined.token }; acceptSnapshot(joined);
+      const userId = authUser?.id;
+      const joined = await request(`${auth ? '/account' : ''}/invites/${encodeURIComponent(value)}/join`, { method: 'POST', data: {} });
+      if(authUser?.id!==userId)return;
+      if(auth)acceptAccountSnapshot(joined,userId);else{sessions[joined.trip.id]={token:joined.token};acceptSnapshot(joined);}
       history.replaceState(null, '', `#trip/${joined.trip.id}`); render(); watchTrip();
       toast('여행에 참여했어요. 이제 친구와 함께 기록해요.');
     } catch(error) { control.disabled = false; throw error; }
@@ -208,3 +286,17 @@ render();
 watchTrip();
 loadInvitation();
 for (const [id, session] of Object.entries(sessions)) request(`/trips/${id}`, { token: session.token }).then(acceptSnapshot).catch(() => {});
+
+if (auth) {
+  auth.onChange(user => {
+    accountEpoch++; authUser = user; currentProfile = null;
+    state.trips = state.trips.filter(t => !sessions[t.id]?.account);
+    sessions = Object.fromEntries(Object.entries(sessions).filter(([,s]) => !s.account));
+    stopStream?.(); stopStream = undefined; streamingId = undefined;
+    render(); watchTrip();
+  });
+  auth.initialize().then(async () => { await loadAccountData(); await loadInvitation(); }).catch(error => toast(error.message));
+  window.addEventListener('storage', event => {
+    if (event.key === auth.storageKey) auth.initialize().then(async () => { await loadAccountData(); await loadInvitation(); }).catch(error => toast(error.message));
+  });
+}

@@ -1,5 +1,5 @@
 // Supabase PostgREST RPC adapter. No privileged keys or table access in the browser.
-export function createSupabaseTransport({ url, publishableKey, fetcher = globalThis.fetch, intervalMs = 2000, getAccessToken = async () => null }) {
+export function createSupabaseTransport({ url, publishableKey, fetcher = globalThis.fetch, intervalMs = 5000, getAccessToken = async () => null }) {
   const endpoint = `${url.replace(/\/$/, '')}/rest/v1/rpc/moa_api`;
   async function request(path, { token, method = 'GET', data = {}, signal } = {}) {
     const account = path.startsWith('/account/');
@@ -38,23 +38,81 @@ export function createSupabaseTransport({ url, publishableKey, fetcher = globalT
   }
   function subscribe(tripId, token, onSnapshot, onConnection, account = false) {
     const controller = new AbortController();
-    let timer, wake;
-    const wait = () => new Promise(resolve => { wake = resolve; timer = setTimeout(resolve, intervalMs); });
+    const documentRef = globalThis.document;
+    const windowRef = globalThis.window;
+    const maxRetryMs = 30000;
+    let timer, wake, activeRequest;
+    let failures = 0;
+    const isActive = () => documentRef?.visibilityState !== 'hidden' && windowRef?.navigator?.onLine !== false;
+    const wait = (ms = null) => new Promise(resolve => {
+      wake = resolve;
+      if (ms !== null) timer = setTimeout(resolve, ms);
+    });
+    const wakeNow = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      wake?.();
+      wake = undefined;
+    };
+    const onVisibility = () => {
+      if (!isActive()) activeRequest?.abort();
+      wakeNow();
+    };
+    const onOffline = () => {
+      activeRequest?.abort();
+      wakeNow();
+    };
+    documentRef?.addEventListener?.('visibilitychange', onVisibility);
+    windowRef?.addEventListener?.('online', onVisibility);
+    windowRef?.addEventListener?.('offline', onOffline);
+
     (async () => {
       while (!controller.signal.aborted) {
+        if (!isActive()) {
+          onConnection('paused');
+          await wait();
+          continue;
+        }
+        const requestController = new AbortController();
+        activeRequest = requestController;
+        const abortRequest = () => requestController.abort();
+        controller.signal.addEventListener('abort', abortRequest, { once: true });
         try {
-          const result = await request(`${account ? '/account' : ''}/trips/${tripId}`, { token, signal: controller.signal });
+          const result = await request(`${account ? '/account' : ''}/trips/${tripId}`, { token, signal: requestController.signal });
           if (controller.signal.aborted) break;
-          onSnapshot(result); onConnection('connected');
+          if (!isActive()) continue;
+          failures = 0;
+          onSnapshot(result);
+          onConnection('connected');
+          await wait(intervalMs);
         } catch (error) {
           if (controller.signal.aborted) break;
-          onConnection(error.status === 401 ? 'unauthorized' : 'reconnecting');
-          if (error.status === 401) break;
+          if (error.name === 'AbortError' && !isActive()) continue;
+          if (error.status === 401) {
+            onConnection('unauthorized');
+            break;
+          }
+          if (!isActive()) continue;
+          onConnection('reconnecting');
+          const retryMs = Math.min(intervalMs * (2 ** Math.min(failures + 1, 10)), maxRetryMs);
+          failures += 1;
+          await wait(retryMs);
+        } finally {
+          controller.signal.removeEventListener('abort', abortRequest);
+          if (activeRequest === requestController) activeRequest = undefined;
         }
-        await wait();
       }
+      clearTimeout(timer);
+      documentRef?.removeEventListener?.('visibilitychange', onVisibility);
+      windowRef?.removeEventListener?.('online', onVisibility);
+      windowRef?.removeEventListener?.('offline', onOffline);
     })();
-    return () => { controller.abort(); clearTimeout(timer); wake?.(); };
+    return () => {
+      controller.abort();
+      activeRequest?.abort();
+      clearTimeout(timer);
+      wakeNow();
+    };
   }
   return { request, subscribe };
 }

@@ -140,7 +140,7 @@ begin
   for mark in select value from jsonb_array_elements(coalesce(previous->'settlementRecords','[]'::jsonb)) loop
     if not exists(select 1 from jsonb_array_elements(coalesce(next->'settlementRecords','[]'::jsonb)) item where item.value=mark)
       and (mark->>'from' is distinct from member_id or mark->>'planKey' is distinct from previous->>'settlementPlanRevision') then
-      raise exception '다른 참여자의 정산 완료 기록은 변경할 수 없어요.';
+      raise insufficient_privilege using message='다른 참여자의 정산 완료 기록은 변경할 수 없어요.';
     end if;
   end loop;
   plan := settlement_plan(next);
@@ -149,7 +149,7 @@ begin
       if mark->>'from' is distinct from member_id or mark->>'completedBy' is distinct from member_id
         or mark->>'planKey' is distinct from next->>'settlementPlanRevision'
         or not exists(select 1 from jsonb_array_elements(plan) p where p->>'from'=mark->>'from' and p->>'to'=mark->>'to' and (p->>'amount')::numeric=(mark->>'amount')::numeric) then
-        raise exception '내 정산 계획에 있는 송금만 완료 처리할 수 있어요.';
+        raise insufficient_privilege using message='내 정산 계획에 있는 송금만 완료 처리할 수 있어요.';
       end if;
     end if;
   end loop;
@@ -242,7 +242,9 @@ begin
     return snapshot(r,member_id) || jsonb_build_object('inviteToken',generated,'expiresAt',expires_at);
   end if;
   return jsonb_build_object('_status',400,'error','지원하지 않는 요청이에요.');
-exception when raise_exception then
+exception when insufficient_privilege then
+  return jsonb_build_object('_status',403,'error',sqlerrm);
+when raise_exception then
   return jsonb_build_object('_status',400,'error',sqlerrm);
 when invalid_text_representation or datetime_field_overflow or numeric_value_out_of_range then
   return jsonb_build_object('_status',400,'error','데이터 형식을 확인해 주세요.');

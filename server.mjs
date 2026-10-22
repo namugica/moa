@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SUPABASE_URL } from './config.mjs';
-import { STATUS, validDates, splitExpense } from './model.mjs';
+import { STATUS, validDates, splitExpense, settlementPlan } from './model.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(32).toString('hex');
@@ -29,7 +29,33 @@ export function validateTrip(t) {
     try { shares = splitExpense(e.amount, e.shares.map(s => s.memberId)); } catch { fail(400, '분할 금액 또는 참여자가 올바르지 않아요.'); }
     if (shares.some((s, i) => s.amount !== e.shares[i].amount)) fail(400, '분할 금액이 일치하지 않아요.');
   }
+  if (t.settlementPlanRevision !== undefined && !id(t.settlementPlanRevision)) fail(400, '정산 계획 버전을 확인해 주세요.');
+  if (t.settlementRecords !== undefined) {
+    if (!Array.isArray(t.settlementRecords) || t.settlementRecords.length > 4000) fail(400, '정산 완료 기록을 확인해 주세요.');
+    const keys = new Set();
+    for (const record of t.settlementRecords) {
+      const key = [record?.planKey,record?.from,record?.to,record?.amount].join(':');
+      if (!id(record?.planKey) || !members.has(record.from) || !members.has(record.to) || record.from === record.to || !Number.isSafeInteger(record.amount) || record.amount < 1 || record.amount > 2_000_000_000_000 || record.completedBy !== record.from || typeof record.completedAt !== 'string' || !Number.isFinite(Date.parse(record.completedAt)) || keys.has(key)) fail(400, '정산 완료 기록을 확인해 주세요.');
+      keys.add(key);
+    }
+  }
   return t;
+}
+
+function validateSettlementChange(previous, next, memberId) {
+  const oldRecords = previous.settlementRecords || [], newRecords = next.settlementRecords || [];
+  const oldKeys = new Set(oldRecords.map(r => JSON.stringify(r)));
+  const newKeys = new Set(newRecords.map(r => JSON.stringify(r)));
+  for (const record of oldRecords) {
+    if (newKeys.has(JSON.stringify(record))) continue;
+    if (record.from !== memberId || record.planKey !== previous.settlementPlanRevision) fail(403, '다른 참여자의 정산 완료 기록은 변경할 수 없어요.');
+  }
+  const currentPlan = settlementPlan(next);
+  for (const record of newRecords) {
+    if (oldKeys.has(JSON.stringify(record))) continue;
+    const validTransfer = currentPlan.some(p => p.from === record.from && p.to === record.to && p.amount === record.amount);
+    if (record.from !== memberId || record.completedBy !== memberId || record.planKey !== next.settlementPlanRevision || !validTransfer) fail(403, '내 정산 계획에 있는 송금만 완료 처리할 수 있어요.');
+  }
 }
 
 export function createMoaServer({ dataDir = process.env.MOA_DATA_DIR || join(root, '.moa-data'), allowedOrigins = process.env.MOA_ALLOWED_ORIGINS || '' } = {}) {
@@ -138,6 +164,7 @@ export function createMoaServer({ dataDir = process.env.MOA_DATA_DIR || join(roo
           if (version !== room.version) return json(res, 409, { error: '친구가 먼저 변경했어요. 최신 내용을 확인하고 다시 저장해 주세요.', ...snapshot(room, memberId) });
           validateTrip(trip);
           if (trip.id !== roomId || JSON.stringify(trip.members) !== JSON.stringify(room.trip.members)) fail(400, '멤버 변경은 초대 기능을 이용해 주세요.');
+          validateSettlementChange(room.trip, trip, memberId);
           const updated = commit(next => { next.rooms[roomId].trip = trip; next.rooms[roomId].version++; return next.rooms[roomId]; });
           publish(roomId);
           return json(res, 200, snapshot(updated, memberId));
@@ -191,3 +218,4 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   server.listen(port, host, () => console.log(`MOA server listening on ${host}:${port}`));
   for (const signal of ['SIGTERM','SIGINT']) process.on(signal, () => { server.closeSharedStreams(); server.close(() => process.exit(0)); });
 }
+

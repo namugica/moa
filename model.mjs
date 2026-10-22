@@ -62,3 +62,20 @@ export function settlementPlan(trip) {
   }
   return transfers;
 }
+
+// A payment mark belongs to one exact expense revision. Older imported trips
+// have no revision token, so their expense content provides a stable fallback.
+export function settlementPlanKey(trip) {
+  if (typeof trip.settlementPlanRevision === 'string' && trip.settlementPlanRevision) return trip.settlementPlanRevision;
+  return JSON.stringify({ expenses: trip.expenses, plan: settlementPlan(trip) });
+}
+
+export function settlementProgress(trip) {
+  const planKey = settlementPlanKey(trip);
+  const records = Array.isArray(trip.settlementRecords) ? trip.settlementRecords : [];
+  return settlementPlan(trip).map((transfer, index) => {
+    const record = records.find(item => item.planKey === planKey && item.from === transfer.from && item.to === transfer.to && item.amount === transfer.amount);
+    return { ...transfer, id: `${index}`, completed: Boolean(record), completedAt: record?.completedAt || null };
+  });
+}
+

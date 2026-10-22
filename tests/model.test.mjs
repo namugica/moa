@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newTrip, splitExpense, balances, amount, dayCount} from '../model.mjs';
+import {newTrip, splitExpense, balances, amount, dayCount, settlementPlan, settlementProgress} from '../model.mjs';
 test('여행 기간 검증 및 멤버 중복 제거',()=>{
  assert.throws(()=>newTrip({title:'서울',destination:'서울',start:'2026-11-02',end:'2026-11-01',names:''}));
  const trip=newTrip({title:'서울',destination:'서울',start:'2026-11-01',end:'2026-11-02',names:'민지, 나, 민지, 수현'});
@@ -33,3 +33,13 @@ test('정산 송금 계획의 각 개인 합계가 잔액과 일치하고 원 �
  assert.ok(plan.every(p=>Number.isSafeInteger(p.amount)&&p.amount>0));
  assert.deepEqual(settlementPlan({...trip,expenses:[]}),[]);
 });
+
+test('완료 표시는 해당 정산 계획 버전에만 적용되고 이전 여행 데이터도 읽는다',()=>{
+ const trip={members:[{id:'a'},{id:'b'}],expenses:[{id:'e1',payerId:'a',amount:10000,shares:splitExpense(10000,['a','b'])}],settlementPlanRevision:'rev-one',settlementRecords:[{planKey:'rev-one',from:'b',to:'a',amount:5000,completedBy:'b',completedAt:'2026-10-22T00:00:00.000Z'}]};
+ assert.equal(settlementProgress(trip)[0].completed,true);
+ const changed=structuredClone(trip);changed.expenses[0].amount=12000;changed.expenses[0].shares=splitExpense(12000,['a','b']);changed.settlementPlanRevision='rev-two';
+ assert.equal(settlementProgress(changed)[0].amount,6000);assert.equal(settlementProgress(changed)[0].completed,false);
+ const legacy={members:trip.members,expenses:trip.expenses};
+ assert.equal(settlementProgress(legacy)[0].completed,false);
+});
+

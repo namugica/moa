@@ -172,7 +172,8 @@ begin
     return snapshot(r,member_id)||jsonb_build_object('account',true,'common',true,'inviteToken',link.token,'expiresAt',link.expires_at);
   end if;
   return jsonb_build_object('_status',400,'error','지원하지 않는 요청이에요.');
-exception when unique_violation then return jsonb_build_object('_status',409,'error','이미 다른 계정과 연결된 멤버예요.');
+exception when insufficient_privilege then return jsonb_build_object('_status',403,'error',sqlerrm);
+when unique_violation then return jsonb_build_object('_status',409,'error','이미 다른 계정과 연결된 멤버예요.');
 when raise_exception then return jsonb_build_object('_status',400,'error',sqlerrm);
 when invalid_text_representation or datetime_field_overflow or numeric_value_out_of_range then return jsonb_build_object('_status',400,'error','데이터 형식을 확인해 주세요.');
 end;

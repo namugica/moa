@@ -133,21 +133,21 @@ begin
 end;
 $$;
 
-create or replace function moa_private.validate_settlement_change(previous jsonb, next jsonb, member_id text)
+create or replace function moa_private.validate_settlement_change(old_trip jsonb, new_trip jsonb, member_id text)
 returns void language plpgsql immutable set search_path = pg_catalog,moa_private as $$
 declare mark jsonb; plan jsonb;
 begin
-  for mark in select value from jsonb_array_elements(coalesce(previous->'settlementRecords','[]'::jsonb)) loop
-    if not exists(select 1 from jsonb_array_elements(coalesce(next->'settlementRecords','[]'::jsonb)) item where item.value=mark)
-      and (mark->>'from' is distinct from member_id or mark->>'planKey' is distinct from previous->>'settlementPlanRevision') then
+  for mark in select value from jsonb_array_elements(coalesce(old_trip->'settlementRecords','[]'::jsonb)) loop
+    if not exists(select 1 from jsonb_array_elements(coalesce(new_trip->'settlementRecords','[]'::jsonb)) item where item.value=mark)
+      and (mark->>'from' is distinct from member_id or mark->>'planKey' is distinct from old_trip->>'settlementPlanRevision') then
       raise insufficient_privilege using message='다른 참여자의 정산 완료 기록은 변경할 수 없어요.';
     end if;
   end loop;
-  plan := settlement_plan(next);
-  for mark in select value from jsonb_array_elements(coalesce(next->'settlementRecords','[]'::jsonb)) loop
-    if not exists(select 1 from jsonb_array_elements(coalesce(previous->'settlementRecords','[]'::jsonb)) item where item.value=mark) then
+  plan := settlement_plan(new_trip);
+  for mark in select value from jsonb_array_elements(coalesce(new_trip->'settlementRecords','[]'::jsonb)) loop
+    if not exists(select 1 from jsonb_array_elements(coalesce(old_trip->'settlementRecords','[]'::jsonb)) item where item.value=mark) then
       if mark->>'from' is distinct from member_id or mark->>'completedBy' is distinct from member_id
-        or mark->>'planKey' is distinct from next->>'settlementPlanRevision'
+        or mark->>'planKey' is distinct from new_trip->>'settlementPlanRevision'
         or not exists(select 1 from jsonb_array_elements(plan) p where p->>'from'=mark->>'from' and p->>'to'=mark->>'to' and (p->>'amount')::numeric=(mark->>'amount')::numeric) then
         raise insufficient_privilege using message='내 정산 계획에 있는 송금만 완료 처리할 수 있어요.';
       end if;

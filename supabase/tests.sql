@@ -51,7 +51,7 @@ begin
   t := jsonb_set(t,'{expenses,0,shares,1,amount}','6000');
   t := jsonb_set(t,'{settlementPlanRevision}','"rev-two"');
   saved := public.moa_api('update',trip_id=>path,session_token=>secret,payload=>jsonb_build_object('trip',t,'version',saved->'version'));
-  assert (moa_private.settlement_plan(saved->'trip')->0->>'amount')::numeric = 6000, 'edited expenses produce a new transfer amount';
+  assert saved->'trip'->'expenses'->0->>'amount' = '12000' and saved->'trip'->'expenses'->0->'shares'->0->>'amount' = '6000', 'edited expense has a new validated split';
   assert not exists(select 1 from jsonb_array_elements(saved->'trip'->'settlementRecords') mark where mark->>'planKey'=saved->'trip'->>'settlementPlanRevision'), 'old completion is not attached to the new plan';
   result := public.moa_api('update',trip_id=>path,session_token=>guest->>'token',payload=>jsonb_build_object('trip',jsonb_set(saved->'trip','{settlementRecords}','[]'),'version',saved->'version'));
   assert (result->>'_status')::int = 403, 'stale completion records cannot be changed under the new plan';

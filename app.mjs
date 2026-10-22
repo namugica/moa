@@ -1,10 +1,9 @@
-import { STATUS, uid, dayCount, amount, splitExpense, balances, totalCost, plannedCost, newTrip, demoTrip, settlementPlan, settlementProgress } from './model.mjs';
+import { STATUS, uid, amount, splitExpense, balances, totalCost, newTrip, settlementPlan, settlementProgress } from './model.mjs';
 import { auth } from './account.mjs';
 import { SESSION_KEY, request, subscribe, CONNECTION_LABEL } from './shared.mjs';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => new Intl.NumberFormat('ko-KR').format(n) + '원';
-const date = d => d.replaceAll('-', '.');
 const KEY = 'moa.prototype.v1';
 let state = { trips: [] }, storageBlocked = false, activeSubmit, activeVersion, toastTimer;
 let sessions = {}, stopStream, streamingId, inviteInfo, inviteError = '', submitting = false;
@@ -70,10 +69,6 @@ const currentTrip = () => tripById(location.hash.split('/')[1]);
 const btn = (action, label, id = '', klass = 'button') => `<button type="button" class="${klass}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
 function cards() { return `<div class="cards">${state.trips.map(t => { const open=settlementProgress(t).filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0); return `<a class="group-card" href="#trip/${t.id}"><div class="group-card-top"><span class="group-icon">${esc((t.title||'모').slice(0,1))}</span><span class="arrow">↗</span></div><h2>${esc(t.title)}</h2><p>${t.members.length}명 · 지출 ${t.expenses.length}건</p><div class="group-card-bottom"><span>${open?`남은 정산 ${money(open)}`:'정산 내역 보기'}</span><strong>${money(totalCost(t))}</strong></div></a>`; }).join('')}<button class="new-card" data-action="create-trip"><span class="plus">+</span><strong>새 정산 모임 만들기</strong><small>친구들과 함께 쓴 돈을 정리해요</small></button></div>`; }
 function home() { return `<div class="page-heading"><div><span class="eyebrow">MOA · GROUP SETTLEMENT</span><h1>모임 정산</h1><p>함께 쓴 돈을 기록하고, 정산할 금액을 한눈에 확인해요.</p></div>${btn('create-trip','＋ 모임 만들기')}</div><section class="group-section"><div class="section-title"><h2>내 정산 모임 <span>${state.trips.length}</span></h2></div>${state.trips.length?cards():`<div class="empty-state"><span class="empty-icon">₩</span><h2>아직 정산 모임이 없어요</h2><p>모임을 만들고 지출을 기록하면<br>누가 누구에게 얼마를 보내야 하는지 계산해 드려요.</p>${btn('create-trip','첫 모임 만들기')}</div>`}</section>`; }
-function itemView(t, item, index, length) {
-  const spent = t.expenses.filter(e => e.itemId === item.id).reduce((s,e) => s+e.amount,0);
-  return `<article class="timeline-item"><div class="item-top"><div><span class="time">${esc(item.time || '시간 미정')} · ${esc(item.category)}</span><h3>${esc(item.place)}</h3></div><div class="item-controls">${index ? btn('up','↑',item.id,'icon-button') : ''}${index < length-1 ? btn('down','↓',item.id,'icon-button') : ''}${btn('edit-item','수정',item.id,'icon-button')}${btn('delete-item','삭제',item.id,'icon-button')}</div></div>${item.note ? `<p>${esc(item.note)}</p>` : ''}<div class="cost-line"><span>예상 ${money(item.estimate)}</span>${spent ? `<b>실제 ${money(spent)}</b>` : ''}</div>${t.status !== 'planning' ? btn('item-expense','＋ 이 일정 지출 기록',item.id,'button ghost') : ''}</article>`;
-}
 function mySettlement(t) {
   const me = balances(t).find(m => m.id === (sessions[t.id]?.memberId || t.members[0].id));
   const transfers = settlementProgress(t).filter(p => p.from === me.id || p.to === me.id);
@@ -81,8 +76,10 @@ function mySettlement(t) {
   const pending = transfers.filter(p => !p.completed).reduce((sum,p) => sum+p.amount,0);
   const sent=transfers.filter(p=>p.from===me.id).reduce((sum,p)=>sum+p.amount,0);
   const received=transfers.filter(p=>p.to===me.id).reduce((sum,p)=>sum+p.amount,0);
-  const headline=me.balance<0?['보낼 금액',money(Math.abs(me.balance))]:me.balance>0?['받을 금액',money(me.balance)]:['정산 완료',money(0)];
-  return `<section class="my-total"><div class="my-total-top"><span>${esc(me.name)}님의 정산 결과</span><span class="avatar-mini">${esc(me.avatar||'')}</span></div><p>${headline[0]}</p><strong class="my-total-amount">${headline[1]}</strong><div class="my-total-breakdown"><div><span>보낼 돈</span><b>${money(sent)}</b></div><div><span>받을 돈</span><b>${money(received)}</b></div></div><div class="progress-line"><span style="width:${sent+received?Math.round(completed/(sent+received)*100):100}%"></span></div><div class="progress-caption"><span>완료 ${money(completed)}</span><span>남은 금액 ${money(pending)}</span></div></section>`;
+  const pendingSent=transfers.filter(p=>p.from===me.id&&!p.completed).reduce((sum,p)=>sum+p.amount,0);
+  const pendingReceived=transfers.filter(p=>p.to===me.id&&!p.completed).reduce((sum,p)=>sum+p.amount,0);
+  const headline=pendingSent?['아직 보낼 금액',money(pendingSent)]:pendingReceived?['아직 받을 금액',money(pendingReceived)]:['정산 완료',money(0)];
+  return `<section class="my-total"><div class="my-total-top"><span>${esc(me.name)}님의 정산 현황</span><span class="avatar-mini">${esc(me.avatar||'')}</span></div><p>${headline[0]}</p><strong class="my-total-amount">${headline[1]}</strong><div class="my-total-breakdown"><div><span>보낼 예정</span><b>${money(sent)}</b></div><div><span>받을 예정</span><b>${money(received)}</b></div></div><div class="progress-line"><span style="width:${sent+received?Math.round(completed/(sent+received)*100):100}%"></span></div><div class="progress-caption"><span>완료 ${money(completed)}</span><span>남은 금액 ${money(pending)}</span></div></section>`;
 }
 function loginButtons() {
   return `<div class="login-buttons">${btn('login-kakao','카카오로 계속하기','','button kakao')}${btn('login-google','구글로 계속하기','','button google')}</div>`;
@@ -206,14 +203,6 @@ function render() {
 function open(title, fields, submit) { activeVersion = sessions[currentTrip()?.id]?.version; $('#editor-form [type="submit"]').hidden = false; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#form-error').textContent=''; activeSubmit=submit; $('#editor').showModal(); }
 function input(label,name,value='',type='text',extra='') { return `<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`; }
 function tripForm() { open('정산 모임 만들기',`${input('모임 이름','title','','text','required maxlength="80" placeholder="예: 제주 여행 정산"')}${authUser?'<p class="help">모임을 만든 뒤 초대 링크를 친구에게 공유하세요.</p>':input('내 이름','myName','나','text','required maxlength="80" placeholder="모임에서 사용할 이름"')}<p class="help">지출과 송금 내역은 친구들과 함께 확인할 수 있어요.</p>`,async data=>{const today=new Date();const dateValue=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;const t=newTrip({title:data.get('title'),destination:'모임 정산',start:dateValue,end:dateValue,myName:authUser?(currentProfile?.name||'나'):data.get('myName')});if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;}if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`;return true;}}); }
-function itemForm(t,id) {
-  const old=t.items.find(i=>i.id===id);
-  open(old?'일정 수정하기':'설레는 일정 추가하기',`${input('장소 이름','place',old?.place,'text','required maxlength="100"') }<div class="field-row"><div>${input('방문 날짜','date',old?.date||t.start,'date',`required min="${t.start}" max="${t.end}"`)}</div><div>${input('시간 (선택)','time',old?.time||'','time')}</div></div><label for="f-category">카테고리</label><select id="f-category" name="category">${['관광','맛집','카페','이동','숙소','기타'].map(v=>`<option ${old?.category===v?'selected':''}>${v}</option>`).join('')}</select>${input('예상 비용 (원)','estimate',old?.estimate??0,'number','required min="0" max="1000000000" step="1"')}<label for="f-note">메모</label><textarea id="f-note" name="note" maxlength="1000">${esc(old?.note||'')}</textarea>`,data=>{
-    const v=Object.fromEntries(data); if(!v.place.trim()) throw Error('장소 이름을 입력해 주세요.'); if(v.date<t.start||v.date>t.end) throw Error('여행 기간 안의 날짜를 선택해 주세요.');
-    const item={...v,place:v.place.trim(),estimate:amount(v.estimate),id:old?.id||uid(),order:old && old.date===v.date?old.order:Math.max(-1,...t.items.map(i=>i.order))+1};
-    return update(s=>{const trip=s.trips.find(x=>x.id===t.id); if(old) trip.items[trip.items.findIndex(i=>i.id===id)]=item; else trip.items.push(item);});
-  });
-}
 function expenseForm(t,id) {
   const old=t.expenses.find(e=>e.id===id);
   open(old?'지출 수정하기':'지출 추가하기',`${input('무엇을 결제했나요?','title',old?.title||'','text','required maxlength="100" placeholder="예: 저녁 식사"')}${input('금액','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0"')}<label for="f-payerId">누가 결제했나요?</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${m.id}" ${(old?.payerId || sessions[t.id]?.memberId || t.members[0].id)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select><label>누구와 나눌까요?</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${m.id}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="help">선택한 멤버끼리 1원 단위까지 똑같이 나눠요.</p>`,data=>{

@@ -49,7 +49,7 @@ function watchTrip() {
 }
 function syncLabel(t) {
   if (!sessions[t.id]) return '이 브라우저에 저장 중';
-  return ({ connected: CONNECTION_LABEL, reconnecting: '연결 끊김 · 다시 연결 중', unauthorized: '참여 권한을 확인해 주세요' })[connectionStatus[t.id]] || '실시간 연결 중';
+  return ({ connected: CONNECTION_LABEL, reconnecting: '연결 끊김 · 다시 연결 중', unauthorized: '참여 권한을 확인해 주세요', paused: '백그라운드에서 동기화 일시 중지' })[connectionStatus[t.id]] || '실시간 연결 중';
 }
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
 async function update(fn) {

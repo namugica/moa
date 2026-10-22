@@ -85,6 +85,74 @@ begin
     end loop;
     expenses := array_append(expenses,e->>'id');
   end loop;
+  if t ? 'settlementPlanRevision' and not valid_id(t->'settlementPlanRevision') then raise exception '정산 계획 버전을 확인해 주세요.'; end if;
+  if t ? 'settlementRecords' then
+    if jsonb_typeof(t->'settlementRecords') is distinct from 'array' or jsonb_array_length(t->'settlementRecords') > 4000 then raise exception '정산 완료 기록을 확인해 주세요.'; end if;
+    for e in select value from jsonb_array_elements(t->'settlementRecords') loop
+      if not valid_id(e->'planKey') or not coalesce((e->>'from') = any(members),false) or not coalesce((e->>'to') = any(members),false)
+        or (e->>'from') = (e->>'to') or jsonb_typeof(e->'amount') is distinct from 'number' or (e->>'amount') !~ '^\d+$' or (e->>'amount')::numeric not between 1 and 2000000000000
+        or e->>'completedBy' is distinct from e->>'from' or jsonb_typeof(e->'completedAt') is distinct from 'string'
+        or length(e->>'completedAt') > 40 then raise exception '정산 완료 기록을 확인해 주세요.'; end if;
+      if (select count(*) from jsonb_array_elements(t->'settlementRecords') prior
+        where prior.value->>'planKey'=e->>'planKey' and prior.value->>'from'=e->>'from'
+          and prior.value->>'to'=e->>'to' and prior.value->>'amount'=e->>'amount') > 1 then raise exception '정산 완료 기록이 중복되었어요.'; end if;
+    end loop;
+  end if;
+end;
+$$;
+
+create or replace function moa_private.settlement_plan(t jsonb)
+returns jsonb language plpgsql immutable set search_path = pg_catalog,moa_private as $$
+declare
+  m jsonb; e jsonb; s jsonb; creditors jsonb := '[]'::jsonb; debtors jsonb := '[]'::jsonb;
+  transfers jsonb := '[]'::jsonb; paid numeric; share numeric; balance numeric;
+  ci integer := 0; di integer := 0; creditor jsonb; debtor jsonb; value numeric;
+begin
+  for m in select value from jsonb_array_elements(t->'members') loop
+    paid := 0; share := 0;
+    for e in select value from jsonb_array_elements(t->'expenses') loop
+      if e->>'payerId'=m->>'id' then paid := paid + (e->>'amount')::numeric; end if;
+      for s in select value from jsonb_array_elements(e->'shares') loop
+        if s->>'memberId'=m->>'id' then share := share + (s->>'amount')::numeric; end if;
+      end loop;
+    end loop;
+    balance := paid-share;
+    if balance>0 then creditors := creditors || jsonb_build_array(jsonb_build_object('id',m->>'id','left',balance));
+    elsif balance<0 then debtors := debtors || jsonb_build_array(jsonb_build_object('id',m->>'id','left',-balance)); end if;
+  end loop;
+  while di<jsonb_array_length(debtors) and ci<jsonb_array_length(creditors) loop
+    debtor := debtors->di; creditor := creditors->ci;
+    value := least((debtor->>'left')::numeric,(creditor->>'left')::numeric);
+    transfers := transfers || jsonb_build_array(jsonb_build_object('from',debtor->>'id','to',creditor->>'id','amount',value));
+    debtors := jsonb_set(debtors,array[di::text,'left'],to_jsonb((debtor->>'left')::numeric-value),false);
+    creditors := jsonb_set(creditors,array[ci::text,'left'],to_jsonb((creditor->>'left')::numeric-value),false);
+    if (debtors->di->>'left')::numeric=0 then di := di+1; end if;
+    if (creditors->ci->>'left')::numeric=0 then ci := ci+1; end if;
+  end loop;
+  return transfers;
+end;
+$$;
+
+create or replace function moa_private.validate_settlement_change(previous jsonb, next jsonb, member_id text)
+returns void language plpgsql immutable set search_path = pg_catalog,moa_private as $$
+declare mark jsonb; plan jsonb;
+begin
+  for mark in select value from jsonb_array_elements(coalesce(previous->'settlementRecords','[]'::jsonb)) loop
+    if not exists(select 1 from jsonb_array_elements(coalesce(next->'settlementRecords','[]'::jsonb)) item where item.value=mark)
+      and (mark->>'from' is distinct from member_id or mark->>'planKey' is distinct from previous->>'settlementPlanRevision') then
+      raise exception '다른 참여자의 정산 완료 기록은 변경할 수 없어요.';
+    end if;
+  end loop;
+  plan := settlement_plan(next);
+  for mark in select value from jsonb_array_elements(coalesce(next->'settlementRecords','[]'::jsonb)) loop
+    if not exists(select 1 from jsonb_array_elements(coalesce(previous->'settlementRecords','[]'::jsonb)) item where item.value=mark) then
+      if mark->>'from' is distinct from member_id or mark->>'completedBy' is distinct from member_id
+        or mark->>'planKey' is distinct from next->>'settlementPlanRevision'
+        or not exists(select 1 from jsonb_array_elements(plan) p where p->>'from'=mark->>'from' and p->>'to'=mark->>'to' and (p->>'amount')::numeric=(mark->>'amount')::numeric) then
+        raise exception '내 정산 계획에 있는 송금만 완료 처리할 수 있어요.';
+      end if;
+    end if;
+  end loop;
 end;
 $$;
 
@@ -151,6 +219,7 @@ begin
     end if;
     t := payload->'trip'; perform validate_trip(t);
     if t->>'id' <> r.id::text or t->'members' is distinct from r.trip->'members' then return jsonb_build_object('_status',400,'error','멤버 변경은 초대 기능을 이용해 주세요.'); end if;
+    perform validate_settlement_change(r.trip,t,member_id);
     update moa_private.rooms set trip = t, version = version + 1, updated_at = now() where id = r.id returning * into r;
     return snapshot(r,member_id);
   end if;
@@ -185,3 +254,4 @@ revoke all on function public.moa_api(text,uuid,text,text,jsonb) from public;
 grant execute on function public.moa_api(text,uuid,text,text,jsonb) to anon, authenticated;
 notify pgrst, 'reload schema';
 commit;
+

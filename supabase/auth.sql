@@ -157,6 +157,7 @@ begin
     if payload->'version' is distinct from to_jsonb(r.version) then return snapshot(r,member_id)||'{"account":true,"_status":409,"error":"친구가 먼저 변경했어요. 최신 내용을 확인하고 다시 저장해 주세요."}'::jsonb; end if;
     t:=payload->'trip'; perform validate_trip(t);
     if t->>'id'<>r.id::text or t->'members' is distinct from r.trip->'members' then return jsonb_build_object('_status',400,'error','멤버는 초대와 프로필 설정으로 변경해 주세요.'); end if;
+    perform validate_settlement_change(r.trip,t,member_id);
     update rooms set trip=t,version=version+1,updated_at=now() where id=r.id returning * into r;
     return snapshot(r,member_id)||'{"account":true}'::jsonb;
   end if;
@@ -181,3 +182,4 @@ revoke all on function public.moa_account_api(text,uuid,text,text,jsonb) from pu
 grant execute on function public.moa_account_api(text,uuid,text,text,jsonb) to anon,authenticated;
 notify pgrst,'reload schema';
 commit;
+

@@ -39,6 +39,22 @@ begin
   assert (result->>'_status')::int = 400, 'membership cannot be changed through edit';
   result := public.moa_api('update',trip_id=>path,session_token=>secret,payload=>jsonb_build_object('trip',jsonb_set(t,'{expenses,0,shares,0,amount}','9999'),'version',saved->'version'));
   assert (result->>'_status')::int = 400, 'invalid split must be rejected';
+  t := jsonb_set(saved->'trip','{settlementPlanRevision}','"rev-one"');
+  saved := public.moa_api('update',trip_id=>path,session_token=>secret,payload=>jsonb_build_object('trip',t,'version',saved->'version'));
+  t := jsonb_set(saved->'trip','{settlementRecords}','[{"planKey":"rev-one","from":"friend","to":"owner","amount":5000,"completedBy":"friend","completedAt":"2026-10-22T00:00:00.000Z"}]');
+  saved := public.moa_api('update',trip_id=>path,session_token=>guest->>'token',payload=>jsonb_build_object('trip',t,'version',saved->'version'));
+  assert saved->'trip'->'settlementRecords' = t->'settlementRecords', 'sender can record a completed transfer';
+  result := public.moa_api('update',trip_id=>path,session_token=>secret,payload=>jsonb_build_object('trip',jsonb_set(saved->'trip','{settlementRecords}','[]'),'version',saved->'version'));
+  assert (result->>'_status')::int = 403, 'another member cannot undo the sender completion';
+  t := jsonb_set(saved->'trip','{expenses,0,amount}','12000');
+  t := jsonb_set(t,'{expenses,0,shares,0,amount}','6000');
+  t := jsonb_set(t,'{expenses,0,shares,1,amount}','6000');
+  t := jsonb_set(t,'{settlementPlanRevision}','"rev-two"');
+  saved := public.moa_api('update',trip_id=>path,session_token=>secret,payload=>jsonb_build_object('trip',t,'version',saved->'version'));
+  assert (moa_private.settlement_plan(saved->'trip')->0->>'amount')::numeric = 6000, 'edited expenses produce a new transfer amount';
+  assert not exists(select 1 from jsonb_array_elements(saved->'trip'->'settlementRecords') mark where mark->>'planKey'=saved->'trip'->>'settlementPlanRevision'), 'old completion is not attached to the new plan';
+  result := public.moa_api('update',trip_id=>path,session_token=>guest->>'token',payload=>jsonb_build_object('trip',jsonb_set(saved->'trip','{settlementRecords}','[]'),'version',saved->'version'));
+  assert (result->>'_status')::int = 403, 'stale completion records cannot be changed under the new plan';
   invitation := public.moa_api('invite',trip_id=>path,session_token=>secret,payload=>'{"name":"수현"}');
   assert jsonb_array_length(invitation->'trip'->'members') = 3, 'new friends can be added';
   link := invitation->>'inviteToken';
@@ -51,3 +67,4 @@ begin
 end;
 $$;
 rollback;
+

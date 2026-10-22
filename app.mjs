@@ -86,7 +86,7 @@ function loginButtons() {
 }
 function loginForm() {
   if (!auth) return toast('로그인은 공유 서비스를 연결한 환경에서 사용할 수 있어요.');
-  open('친구와 함께 여행하기', `<p>로그인하면 다른 기기에서도 같은 프로필과 모아장부를 이어갈 수 있어요.</p>${loginButtons()}<p class="help">초대받은 모임은 로그인 후에도 그대로 이어져요.</p>`, () => false);
+  open('MOA 장부를 함께 쓰기', `<p>로그인하면 다른 기기에서도 같은 프로필과 모아장부를 이어갈 수 있어요.</p>${loginButtons()}<p class="help">초대받은 장부는 로그인 후에도 그대로 이어져요.</p>`, () => false);
   $('#editor-form [type="submit"]').hidden = true;
 }
 function acceptAccountSnapshot(data, userId = authUser?.id) {
@@ -108,7 +108,7 @@ async function loadAccountData() {
 function profileForm() {
   if (!authUser) return loginForm();
   const initialName = currentProfile?.name || authUser.user_metadata?.full_name || authUser.user_metadata?.name || '';
-  open('내 프로필 설정', `${input('친구들에게 표시할 이름','profileName',initialName,'text','required maxlength="80"')}<label for="f-avatar">프로필 아이콘</label><select id="f-avatar" name="avatar">${AVATARS.map(icon => `<option ${currentProfile?.avatar === icon ? 'selected' : ''}>${icon}</option>`).join('')}</select><p class="help">이 프로필은 로그인한 계정에 저장돼요. 이름을 변경해도 정산 기록은 유지돼요.</p>${btn('logout','로그아웃','','button secondary')}`, async data => {
+  open('내 프로필 설정', `${input('친구들에게 표시할 이름','profileName',initialName,'text','required maxlength="80"')}<label for="f-avatar">프로필 아이콘</label><select id="f-avatar" name="avatar">${AVATARS.map(icon => `<option ${currentProfile?.avatar === icon ? 'selected' : ''}>${icon}</option>`).join('')}</select><p class="help">이 프로필은 로그인한 계정에 저장돼요. 이름을 변경해도 장부 기록은 그대로 남아요.</p>${btn('logout','로그아웃','','button secondary')}`, async data => {
     const userId = authUser.id;
     const saved = await request('/account/profile', { method:'PUT', data:{ name:data.get('profileName').trim(), avatar:data.get('avatar') } });
     if (authUser?.id !== userId) return false;
@@ -118,7 +118,7 @@ function profileForm() {
 function invitationView() {
   if (inviteError) return `<section class="panel"><h1>초대를 확인해 주세요</h1><p role="alert">${esc(inviteError)}</p><a class="button secondary" href="#home">홈으로</a></section>`;
   if (!inviteInfo) return '<section class="panel"><p role="status">초대를 확인하고 있어요…</p></section>';
-  return `<section class="panel invite-landing"><span class="eyebrow">MOA · 공동 장부</span><h1>${esc(inviteInfo.title)}</h1><p>${inviteInfo.common ? '하나의 링크로 친구들과 함께 쓰는 모아장부예요.' : `<strong>${esc(inviteInfo.memberName)}</strong>님에게 온 초대예요.`}</p><p>지출을 함께 기록하고, 정산 상태를 확인할 수 있어요.</p>${!auth ? btn('join-trip','초대 수락하고 참여하기') : !authUser ? loginButtons() : !currentProfile ? btn('profile','내 프로필 설정하고 참여하기') : `<p>${esc(currentProfile.avatar)} ${esc(currentProfile.name)}님으로 참여해요.</p>${btn('join-trip','초대 수락하고 참여하기')}`}<p class="help">${inviteInfo.common ? '친구들이 같은 링크로 각자의 계정으로 참여해요.' : '기존 개별 초대를 수락하면 해당 멤버가 내 계정과 연결돼요.'} 다른 기기에서도 같은 계정으로 모아장부를 이어갈 수 있어요.</p></section>`;
+  return `<section class="panel invite-landing"><span class="eyebrow">MOA · 공동 장부</span><h1>${esc(inviteInfo.title)}</h1><p>${inviteInfo.common ? '하나의 링크로 친구들과 함께 쓰는 모아장부예요.' : `<strong>${esc(inviteInfo.memberName)}</strong>님에게 온 초대예요.`}</p><p>지출을 함께 모으고, 각자 보낼 몫을 확인할 수 있어요.</p>${!auth ? btn('join-trip','초대 수락하고 참여하기') : !authUser ? loginButtons() : !currentProfile ? btn('profile','내 프로필 설정하고 참여하기') : `<p>${esc(currentProfile.avatar)} ${esc(currentProfile.name)}님으로 참여해요.</p>${btn('join-trip','초대 수락하고 참여하기')}`}<p class="help">${inviteInfo.common ? '친구들이 같은 링크로 각자의 계정으로 참여해요.' : '기존 개별 초대를 수락하면 해당 멤버가 내 계정과 연결돼요.'} 다른 기기에서도 같은 계정으로 모아장부를 이어갈 수 있어요.</p></section>`;
 }
 async function loadInvitation() {
   const value = location.hash.startsWith('#invite/') ? location.hash.slice(8) : null;
@@ -197,12 +197,12 @@ function render() {
   const t = currentTrip();
   $('#auth-controls').innerHTML = !auth ? '' : authUser ? btn('profile', `${esc(currentProfile?.avatar || '🌿')} ${esc(currentProfile?.name || '내 프로필')}`, '', 'button secondary') : btn('login','로그인','','button secondary');
   const connection=$('.global-sync');
-  if(connection) connection.textContent=t?syncLabel(t):'친구와 함께 정산';
-  $('#main').innerHTML = (storageBlocked?'<div class="warning">저장된 데이터를 읽을 수 없어요. 기존 기록 보호를 위해 변경을 중단했습니다. 브라우저 저장소 설정을 확인해 주세요.</div>':'') + (route==='invite' ? invitationView() : route==='trip' ? (t?tripView(t):'<div class="empty-state"><h2>장부를 찾을 수 없어요</h2><a href="#home">모임 목록으로</a></div>') : home());
+  if(connection) connection.textContent=t?syncLabel(t):'함께 쓴 돈을 모아요';
+  $('#main').innerHTML = (storageBlocked?'<div class="warning">저장된 데이터를 읽을 수 없어요. 기존 기록 보호를 위해 변경을 중단했습니다. 브라우저 저장소 설정을 확인해 주세요.</div>':'') + (route==='invite' ? invitationView() : route==='trip' ? (t?tripView(t):'<div class="empty-state"><h2>장부를 찾을 수 없어요</h2><a href="#home">장부 목록으로</a></div>') : home());
 }
 function open(title, fields, submit) { activeVersion = sessions[currentTrip()?.id]?.version; $('#editor-form [type="submit"]').hidden = false; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#form-error').textContent=''; activeSubmit=submit; $('#editor').showModal(); }
 function input(label,name,value='',type='text',extra='') { return `<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`; }
-function tripForm() { open('새 장부 만들기',`${input('장부 이름','title','','text','required maxlength="80" placeholder="예: 제주 여행"')}${authUser?'<p class="help">모임을 만든 뒤 초대 링크를 친구에게 공유하세요.</p>':input('내 이름','myName','나','text','required maxlength="80" placeholder="모임에서 사용할 이름"')}<p class="help">지출과 송금 내역은 친구들과 함께 확인할 수 있어요.</p>`,async data=>{const today=new Date();const dateValue=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;const t=newTrip({title:data.get('title'),destination:'모임 정산',start:dateValue,end:dateValue,myName:authUser?(currentProfile?.name||'나'):data.get('myName')});if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;}if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`;return true;}}); }
+function tripForm() { open('새 장부 만들기',`${input('장부 이름','title','','text','required maxlength="80" placeholder="예: 제주 여행"')}${authUser?'<p class="help">장부를 만든 뒤 초대 링크를 친구에게 공유하세요.</p>':input('내 이름','myName','나','text','required maxlength="80" placeholder="장부에서 사용할 이름"')}<p class="help">지출과 송금 내역은 친구들과 함께 확인할 수 있어요.</p>`,async data=>{const today=new Date();const dateValue=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;const t=newTrip({title:data.get('title'),destination:'모임 정산',start:dateValue,end:dateValue,myName:authUser?(currentProfile?.name||'나'):data.get('myName')});if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;}if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`;return true;}}); }
 function expenseForm(t,id) {
   const old=t.expenses.find(e=>e.id===id);
   open(old?'지출 수정하기':'지출 추가하기',`${input('무엇을 결제했나요?','title',old?.title||'','text','required maxlength="100" placeholder="예: 저녁 식사"')}${input('금액','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0"')}<label for="f-payerId">누가 결제했나요?</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${m.id}" ${(old?.payerId || sessions[t.id]?.memberId || t.members[0].id)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select><label>누구와 나눌까요?</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${m.id}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="help">선택한 멤버끼리 1원 단위까지 똑같이 나눠요.</p>`,data=>{
@@ -226,7 +226,7 @@ document.addEventListener('click',async e=>{
   }
   if(action==='logout') { $('#editor').close(); location.hash='home'; await auth.signOut(); toast('로그아웃했어요.'); return; }
   if(action==='share-invite') {
-    try { await navigator.share({ title: 'MOA 모임 정산 초대', text: '함께 쓴 돈을 정산해요.', url: $('[name="inviteLink"]').value }); }
+    try { await navigator.share({ title: 'MOA 장부 초대', text: '우리 장부를 같이 써요.', url: $('[name="inviteLink"]').value }); }
     catch(error) { if (error.name !== 'AbortError') toast('공유하지 못했어요. 링크 복사를 이용해 주세요.'); }
     return;
   }
@@ -246,7 +246,7 @@ document.addEventListener('click',async e=>{
       if(authUser?.id!==userId)return;
       if(auth)acceptAccountSnapshot(joined,userId);else{sessions[joined.trip.id]={token:joined.token};acceptSnapshot(joined);}
       history.replaceState(null, '', `#trip/${joined.trip.id}`); render(); watchTrip();
-      toast('모임에 참여했어요. 함께 정산을 시작해요.');
+      toast('모아장부를 함께 쓰기 시작했어요.');
     } catch(error) { control.disabled = false; throw error; }
     return;
   }
@@ -272,7 +272,7 @@ $('#editor-form').addEventListener('submit', async e => {
   e.preventDefault(); if (submitting) return;
   const submit = e.target.querySelector('[type="submit"]');
   submitting = true; submit.disabled = true;
-  try { if (await activeSubmit(new FormData(e.target))) { $('#editor').close(); toast('여행에 잘 모아두었어요.'); } }
+  try { if (await activeSubmit(new FormData(e.target))) { $('#editor').close(); toast('모아장부에 저장했어요.'); } }
   catch(error) { $('#form-error').textContent = error.message; }
   finally { submitting = false; submit.disabled = false; }
 });

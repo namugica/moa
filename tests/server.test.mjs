@@ -106,3 +106,54 @@ test('GitHub Pages 출처의 API 사전 요청만 허용하고 잘못된 데이�
   bad.members=owner.trip.members;bad.start='2026-02-31';bad.end='2026-03-05';
   assert.equal((await call('/api/trips',{method:'POST',data:{trip:bad}})).status,400);
 });
+
+test('정산 완료는 송금자 본인만 기록·취소할 수 있고 지출 변경 후에는 과거 표시를 적용하지 않는다',async t=>{
+  const {call,create}=await fixture(t);
+  const owner=await create(),path=`/api/trips/${owner.trip.id}`;
+  const invite=(await call(path+'/invites',{token:owner.token,method:'POST',data:{memberId:owner.trip.members[1].id}})).data;
+  const guest=(await call('/api/invites/'+invite.inviteToken+'/join',{method:'POST',data:{}})).data;
+  let latest=(await call(path,{token:owner.token})).data;
+  const trip=structuredClone(latest.trip);trip.expenses=[{id:crypto.randomUUID(),title:'점심',amount:10000,payerId:owner.memberId,itemId:null,shares:splitExpense(10000,trip.members.map(m=>m.id))}];trip.settlementPlanRevision='rev-one';
+  latest=(await call(path,{token:owner.token,method:'PATCH',data:{trip,version:latest.version}})).data;
+  const marked=structuredClone(latest.trip);marked.settlementRecords=[{planKey:'rev-one',from:guest.memberId,to:owner.memberId,amount:5000,completedBy:guest.memberId,completedAt:'2026-10-22T00:00:00.000Z'}];
+  const paid=await call(path,{token:guest.token,method:'PATCH',data:{trip:marked,version:latest.version}});
+  assert.equal(paid.status,200);
+  const unauthorized=structuredClone(paid.data.trip);unauthorized.settlementRecords=[];
+  assert.equal((await call(path,{token:owner.token,method:'PATCH',data:{trip:unauthorized,version:paid.data.version}})).status,403);
+  const undone=await call(path,{token:guest.token,method:'PATCH',data:{trip:unauthorized,version:paid.data.version}});
+  assert.equal(undone.status,200);
+  const markedAgain=structuredClone(undone.data.trip);markedAgain.settlementRecords=[...marked.settlementRecords];
+  const confirmed=await call(path,{token:guest.token,method:'PATCH',data:{trip:markedAgain,version:undone.data.version}});
+  const changed=structuredClone(confirmed.data.trip);changed.expenses[0].amount=12000;changed.expenses[0].shares=splitExpense(12000,changed.members.map(m=>m.id));changed.settlementPlanRevision='rev-two';
+  const revised=await call(path,{token:owner.token,method:'PATCH',data:{trip:changed,version:confirmed.data.version}});
+  assert.equal(revised.status,200);
+  assert.equal(settlementPlan(revised.data.trip)[0].amount,6000);
+  const {settlementProgress}=await import('../model.mjs');
+  assert.equal(settlementProgress(revised.data.trip)[0].completed,false);
+  assert.equal(revised.data.trip.settlementRecords.length,1,'old marks remain historical data but are not attached to the new plan');
+});
+
+test('동시에 두 참여자가 완료 표시를 저장하면 한 변경은 충돌로 반환하고 기록을 덮어쓰지 않는다',async t=>{
+  const {call}=await fixture(t);
+  const owner=(await call('/api/trips',{method:'POST',data:{trip:newTrip({title:'세 명 여행',destination:'제주',start:'2026-11-01',end:'2026-11-02',names:'민지, 수현'})}})).data;const path=`/api/trips/${owner.trip.id}`;
+  const tokens=[];
+  for(const member of owner.trip.members.slice(1)){
+    const invitation=(await call(path+'/invites',{token:owner.token,method:'POST',data:{memberId:member.id}})).data;
+    tokens.push((await call('/api/invites/'+invitation.inviteToken+'/join',{method:'POST',data:{}})).data);
+  }
+  let current=(await call(path,{token:owner.token})).data;
+  const base=structuredClone(current.trip);base.expenses=[{id:crypto.randomUUID(),title:'택시',amount:9000,payerId:base.members[0].id,itemId:null,shares:splitExpense(9000,base.members.map(m=>m.id))}];base.settlementPlanRevision='shared-plan';
+  current=(await call(path,{token:owner.token,method:'PATCH',data:{trip:base,version:current.version}})).data;
+  const plan=settlementPlan(current.trip);
+  assert.equal(plan.length,2);
+  const attempts=await Promise.all(tokens.map(token=>{
+    const transfer=plan.find(p=>p.from===token.memberId);
+    const trip=structuredClone(current.trip);trip.settlementRecords=[{planKey:'shared-plan',...transfer,completedBy:token.memberId,completedAt:'2026-10-22T00:00:00.000Z'}];
+    return call(path,{token:token.token,method:'PATCH',data:{trip,version:current.version}});
+  }));
+  assert.deepEqual(attempts.map(result=>result.status).sort(),[200,409]);
+  const winner=attempts.find(result=>result.status===200).data;
+  assert.equal(winner.trip.settlementRecords.length,1);
+  assert.equal((await call(path,{token:owner.token})).data.trip.settlementRecords.length,1);
+});
+

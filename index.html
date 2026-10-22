@@ -3,29 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#123d34">
-  <title>MOA — 여행의 순간을 모으다</title>
+  <meta name="theme-color" content="#f5f7fb">
+  <meta name="description" content="친구들과 함께 쓴 돈을 쉽고 투명하게 정산해요.">
+  <title>MOA — 모임 정산</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <a class="skip" href="#main">본문으로 건너뛰기</a>
-  <aside class="sidebar">
-    <a href="#home" class="brand" aria-label="MOA 홈">moa<span>●</span></a>
-    <p class="brand-caption">여행의 순간을 모으다</p>
-    <nav aria-label="주 메뉴">
-      <a href="#home" data-nav="home"><span aria-hidden="true">⌂</span> 홈</a>
-      <a href="#trips" data-nav="trips"><span aria-hidden="true">▧</span> 나의 여행</a>
-      <a href="#guide" data-nav="guide"><span aria-hidden="true">◉</span> MOA 가이드</a>
-    </nav>
-    <div class="sidebar-note"><span>↗</span><p>계획부터 정산까지,<br>가벼운 마음으로 떠나요.</p><small>나의 여행 파트너, MOA</small></div>
-    <div class="profile"><span class="avatar">나</span><div><strong>여행자님</strong><small>이 브라우저에 저장 중</small></div></div>
-  </aside>
-  <div class="workspace">
-    <header class="topbar"><span id="breadcrumb">나의 여행 대시보드</span><div class="topbar-actions"><span class="local-badge"><i></i> 함께하는 여행</span><div id="auth-controls"></div></div></header>
+  <div class="app-shell">
+    <header class="app-header">
+      <a href="#home" class="brand" aria-label="MOA 홈">moa<span>●</span></a>
+      <div class="header-right"><span class="global-sync">친구와 함께 정산</span><div id="auth-controls"></div></div>
+    </header>
     <main id="main" tabindex="-1"></main>
-    <footer>함께한 순간도, 함께 쓴 돈도. <strong>moa</strong><span>공유 여행은 친구와 함께, 개인 기록은 이 브라우저에.</span></footer>
+    <footer><strong>moa</strong><span>함께 쓴 돈을 간단하고 투명하게 정산해요.</span></footer>
   </div>
-  <dialog id="editor" aria-labelledby="dialog-title"><form id="editor-form"><header><h2 id="dialog-title"></h2><button type="button" class="icon-button" data-close aria-label="닫기">✕</button></header><div id="dialog-fields"></div><p class="form-error" id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary" data-close>취소</button><button class="button" type="submit">저장하기</button></div></form></dialog>
+  <dialog id="editor" aria-labelledby="dialog-title">
+    <form id="editor-form">
+      <header class="dialog-header"><h2 id="dialog-title"></h2><button type="button" class="icon-button" data-close aria-label="닫기">✕</button></header>
+      <div id="dialog-fields"></div><p class="form-error" id="form-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-close>취소</button><button class="button" type="submit">저장하기</button></div>
+    </form>
+  </dialog>
   <div class="toast" id="toast" role="status"></div>
   <script type="module" src="app.mjs"></script>
 </body>

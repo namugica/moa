@@ -2,7 +2,7 @@ import { API_BASE, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.mjs';
 import { auth } from './account.mjs';
 import { createSupabaseTransport } from './supabase-client.mjs';
 const supabase = SUPABASE_URL ? createSupabaseTransport({ url: SUPABASE_URL, publishableKey: SUPABASE_PUBLISHABLE_KEY, getAccessToken: () => auth.getAccessToken() }) : null;
-export const CONNECTION_LABEL = supabase ? '자동 동기화 · 2초마다' : '실시간 연결됨';
+export const CONNECTION_LABEL = '공유 중';
 const base = API_BASE.replace(/\/$/, '');
 export const SESSION_KEY = `moa.shared.v1:${SUPABASE_URL || base || location.origin}`;
 export async function request(path, { token, method = 'GET', data, signal, stream = false } = {}) {

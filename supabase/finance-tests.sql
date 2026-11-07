@@ -1,0 +1,45 @@
+begin;
+insert into auth.users(id) values('00000000-0000-0000-0000-000000000001'),('00000000-0000-0000-0000-000000000002'),('00000000-0000-0000-0000-000000000003');
+set local role authenticated;
+do $$
+declare
+ owner_uid text:='00000000-0000-0000-0000-000000000001'; friend_uid text:='00000000-0000-0000-0000-000000000002';
+ t jsonb:='{"id":"finance","title":"모임","destination":"모임","start":"2026-11-01","end":"2026-11-02","status":"planning","members":[{"id":"owner","name":"나"}],"items":[],"expenses":[]}';
+ r jsonb; data jsonb; link text; rid uuid; eid uuid; f jsonb;
+ submission jsonb:='{"title":"준비물","amount":300,"spent_on":"2026-11-01","event":"모임","purpose":"행사 준비","payment":"personal","missing_reason":"분실"}';
+begin
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_uid)::text,true);
+ perform public.moa_account_api('save_profile',payload=>'{"name":"관리자","avatar":"🌿"}');
+ r:=public.moa_account_api('create',payload=>jsonb_build_object('trip',t));rid:=(r->'trip'->>'id')::uuid;
+ link:=public.moa_account_api('invite',trip_id=>rid)->>'inviteToken';
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',friend_uid)::text,true);
+ perform public.moa_account_api('save_profile',payload=>'{"name":"민지","avatar":"🐱"}');
+ perform public.moa_account_api('join',invite_token=>link);
+ assert public.moa_finance_api('submit',rid,submission)->>'ok'='true','submit personal cost';
+ data:=public.moa_finance_api('list',rid);eid:=(data->'entries'->0->>'id')::uuid;
+ assert data->>'manager'='false','participant is not manager';
+ assert (public.moa_finance_api('review',rid,jsonb_build_object('id',eid,'revision',1,'status','approved'))->>'_status')::int=403,'participant cannot approve';
+ assert (public.moa_finance_api('cash',rid,'{"kind":"income","amount":1000,"title":"입금"}')->>'_status')::int=403,'participant cannot change funds';
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_uid)::text,true);
+ assert public.moa_finance_api('review',rid,jsonb_build_object('id',eid,'revision',1,'status','changes','note','확인 필요'))->>'ok'='true','request correction';
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',friend_uid)::text,true);
+ assert (public.moa_finance_api('submit',rid,submission||jsonb_build_object('id',eid,'revision',1))->>'_status')::int=409,'stale edits rejected';
+ assert public.moa_finance_api('submit',rid,submission||jsonb_build_object('id',eid,'revision',2))->>'ok'='true','resubmit corrected entry';
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_uid)::text,true);
+ assert (public.moa_finance_api('review',rid,jsonb_build_object('id',eid,'revision',2,'status','approved'))->>'_status')::int=409,'stale review rejected';
+ assert public.moa_finance_api('review',rid,jsonb_build_object('id',eid,'revision',3,'status','approved'))->>'ok'='true','approve';
+ assert public.moa_finance_api('pay',rid,jsonb_build_object('id',eid))->>'ok'='true','pay';
+ assert (public.moa_finance_api('pay',rid,jsonb_build_object('id',eid))->>'_status')::int=409,'no duplicate payout';
+ assert public.moa_finance_api('submit',rid,submission||'{"payment":"fund"}')->>'ok'='true','manager submission';
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',friend_uid)::text,true);
+ data:=public.moa_finance_api('list',rid);
+ assert jsonb_array_length(data->'entries')=1,'participant sees only own submissions';
+ assert jsonb_array_length(data->'cash')=1,'participant sees own payout';
+ assert (public.moa_finance_api('submit',rid,submission||jsonb_build_object('id',eid,'revision',4))->>'_status')::int=400,'approved cost immutable';
+ perform set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-000000000003"}',true);
+ assert (public.moa_finance_api('list',rid)->>'_status')::int=403,'outsider blocked';
+ begin perform 1 from moa_private.finance_entries; raise exception 'direct access allowed'; exception when insufficient_privilege then null; end;
+ raise notice 'PASS finance: membership, role, resubmission, review conflicts, immutable approvals, payout idempotency, privacy';
+end;
+$$;
+rollback;

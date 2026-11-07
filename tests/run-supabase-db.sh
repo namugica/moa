@@ -7,7 +7,7 @@ export MOA_TEST_CONTAINER
 trap 'docker rm -f "$MOA_TEST_CONTAINER" >/dev/null 2>&1 || true' EXIT INT TERM
 docker run -d --rm --name "$MOA_TEST_CONTAINER" --network none -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17-alpine >/dev/null
 attempt=0
-until docker exec "$MOA_TEST_CONTAINER" pg_isready -U postgres >/dev/null 2>&1; do
+until docker exec "$MOA_TEST_CONTAINER" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 30 ]; then echo 'Local test database did not start' >&2; exit 1; fi
   sleep 1
@@ -21,4 +21,9 @@ docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < tests
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth.sql
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth.sql
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/auth-tests.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance-tests.sql
 if [ "${MOA_BROWSER_TEST:-0}" = 1 ]; then python3 tests/supabase-browser-smoke.py; fi
+
+if [ "${MOA_FINANCE_BROWSER_TEST:-0}" = 1 ]; then python3 tests/finance-browser-smoke.py; fi

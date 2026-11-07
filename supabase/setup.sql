@@ -108,11 +108,11 @@ declare
   transfers jsonb := '[]'::jsonb; paid numeric; share numeric; balance numeric;
   ci integer := 0; di integer := 0; creditor jsonb; debtor jsonb; value numeric;
 begin
-  for m in select value from jsonb_array_elements(t->'members') loop
+  for m in select element.value from jsonb_array_elements(t->'members') as element loop
     paid := 0; share := 0;
-    for e in select value from jsonb_array_elements(t->'expenses') loop
+    for e in select element.value from jsonb_array_elements(t->'expenses') as element loop
       if e->>'payerId'=m->>'id' then paid := paid + (e->>'amount')::numeric; end if;
-      for s in select value from jsonb_array_elements(e->'shares') loop
+      for s in select element.value from jsonb_array_elements(e->'shares') as element loop
         if s->>'memberId'=m->>'id' then share := share + (s->>'amount')::numeric; end if;
       end loop;
     end loop;

@@ -67,8 +67,8 @@ async function update(fn) {
 const tripById = id => state.trips.find(t => t.id === id);
 const currentTrip = () => tripById(location.hash.split('/')[1]);
 const btn = (action, label, id = '', klass = 'button') => `<button type="button" class="${klass}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
-function cards() { return `<div class="cards">${state.trips.map(t => { const open=settlementProgress(t).filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0); return `<a class="group-card" href="#trip/${t.id}"><div class="group-card-top"><span class="group-icon">${esc((t.title||'모').slice(0,1))}</span><span class="arrow">↗</span></div><h2>${esc(t.title)}</h2><p>${t.members.length}명 · 지출 ${t.expenses.length}건</p><div class="group-card-bottom"><span>${open?`남은 송금 ${money(open)}`:'장부 열기'}</span><strong>${money(totalCost(t))}</strong></div></a>`; }).join('')}<button class="new-card" data-action="create-trip"><span class="plus">+</span><strong>새 공간 만들기</strong><small>친구들과 함께 쓴 돈을 정리해요</small></button></div>`; }
-function home() { return `<div class="page-heading"><div><span class="eyebrow">MOA SPACE · CLUB FINANCE</span><h1>Moa Space</h1><p>같이 쓴 돈은 모아, 각자 보낼 몫은 또렷하게.</p></div>${btn('create-trip','＋ 공간 만들기')}</div><section class="group-section"><div class="section-title"><h2>내 Moa Space <span>${state.trips.length}</span></h2></div>${state.trips.length?cards():`<div class="empty-state"><span class="empty-icon">₩</span><h2>아직 장부가 비어 있어요</h2><p>공간을 만들고 친구를 부르면<br>함께 쓴 돈과 보낼 몫을 모아 보여드려요.</p>${btn('create-trip','첫 공간 만들기')}</div>`}</section>`; }
+function cards() { return `<div class="cards">${state.trips.map(t => { const open=settlementProgress(t).filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0); return `<a class="group-card" href="#trip/${t.id}"><div class="group-card-top"><span class="group-icon">${esc((t.title||'모').slice(0,1))}</span><span class="arrow">↗</span></div><h2>${esc(t.title)}</h2><p>${t.members.length}명 · 지출 ${t.expenses.length}건</p><div class="group-card-bottom"><span>${open?`남은 송금 ${money(open)}`:'공간 열기'}</span><strong>${money(totalCost(t))}</strong></div></a>`; }).join('')}<button class="new-card" data-action="create-trip"><span class="plus">+</span><strong>새 공간 만들기</strong><small>친구들과 함께 쓴 돈을 정리해요</small></button></div>`; }
+function home() { return `<div class="page-heading"><div><span class="eyebrow">MOA SPACE · CLUB FINANCE</span><h1>Moa Space</h1><p>같이 쓴 돈은 모아, 각자 보낼 몫은 또렷하게.</p></div>${btn('create-trip','＋ 공간 만들기')}</div><section class="group-section"><div class="section-title"><h2>내 Moa Space <span>${state.trips.length}</span></h2></div>${state.trips.length?cards():`<div class="empty-state"><span class="empty-icon">₩</span><h2>아직 공간이 비어 있어요</h2><p>공간을 만들고 친구를 부르면<br>함께 쓴 돈과 보낼 몫을 모아 보여드려요.</p>${btn('create-trip','첫 공간 만들기')}</div>`}</section>`; }
 function mySettlement(t) {
   const me = balances(t).find(m => m.id === (sessions[t.id]?.memberId || t.members[0].id));
   const transfers = settlementProgress(t).filter(p => p.from === me.id || p.to === me.id);
@@ -118,7 +118,7 @@ function profileForm() {
 function invitationView() {
   if (inviteError) return `<section class="panel"><h1>초대를 확인해 주세요</h1><p role="alert">${esc(inviteError)}</p><a class="button secondary" href="#home">홈으로</a></section>`;
   if (!inviteInfo) return '<section class="panel"><p role="status">초대를 확인하고 있어요…</p></section>';
-  return `<section class="panel invite-landing"><span class="eyebrow">MOA · 공동 장부</span><h1>${esc(inviteInfo.title)}</h1><p>${inviteInfo.common ? '하나의 링크로 친구들과 함께 쓰는 Moa Space예요.' : `<strong>${esc(inviteInfo.memberName)}</strong>님에게 온 초대예요.`}</p><p>지출을 함께 모으고, 각자 보낼 몫을 확인할 수 있어요.</p>${!auth ? btn('join-trip','초대 수락하고 참여하기') : !authUser ? loginButtons() : !currentProfile ? btn('profile','내 프로필 설정하고 참여하기') : `<p>${esc(currentProfile.avatar)} ${esc(currentProfile.name)}님으로 참여해요.</p>${btn('join-trip','초대 수락하고 참여하기')}`}<p class="help">${inviteInfo.common ? '친구들이 같은 링크로 각자의 계정으로 참여해요.' : '기존 개별 초대를 수락하면 해당 멤버가 내 계정과 연결돼요.'} 다른 기기에서도 같은 계정으로 Moa Space를 이어갈 수 있어요.</p></section>`;
+  return `<section class="panel invite-landing"><span class="eyebrow">MOA SPACE · 함께하는 공간</span><h1>${esc(inviteInfo.title)}</h1><p>${inviteInfo.common ? '하나의 링크로 친구들과 함께 쓰는 Moa Space예요.' : `<strong>${esc(inviteInfo.memberName)}</strong>님에게 온 초대예요.`}</p><p>지출을 함께 모으고, 각자 보낼 몫을 확인할 수 있어요.</p>${!auth ? btn('join-trip','초대 수락하고 참여하기') : !authUser ? loginButtons() : !currentProfile ? btn('profile','내 프로필 설정하고 참여하기') : `<p>${esc(currentProfile.avatar)} ${esc(currentProfile.name)}님으로 참여해요.</p>${btn('join-trip','초대 수락하고 참여하기')}`}<p class="help">${inviteInfo.common ? '친구들이 같은 링크로 각자의 계정으로 참여해요.' : '기존 개별 초대를 수락하면 해당 멤버가 내 계정과 연결돼요.'} 다른 기기에서도 같은 계정으로 Moa Space를 이어갈 수 있어요.</p></section>`;
 }
 async function loadInvitation() {
   const value = location.hash.startsWith('#invite/') ? location.hash.slice(8) : null;
@@ -226,7 +226,7 @@ document.addEventListener('click',async e=>{
   }
   if(action==='logout') { $('#editor').close(); location.hash='home'; await auth.signOut(); toast('로그아웃했어요.'); return; }
   if(action==='share-invite') {
-    try { await navigator.share({ title: 'Moa Space 초대', text: '우리 장부를 같이 써요.', url: $('[name="inviteLink"]').value }); }
+    try { await navigator.share({ title: 'Moa Space 초대', text: 'Moa Space에 함께 참여해요.', url: $('[name="inviteLink"]').value }); }
     catch(error) { if (error.name !== 'AbortError') toast('공유하지 못했어요. 링크 복사를 이용해 주세요.'); }
     return;
   }

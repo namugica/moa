@@ -224,3 +224,111 @@ dialog{border-radius:18px}
 }
 .empty-inline>span{color:#557da6}
 .check-list input{accent-color:#315f91}
+
+/* Settlement screen: compact summaries, clear actions, responsive rows */
+.settlement-board{
+  grid-template-columns:minmax(0,1.25fr) minmax(220px,.75fr);
+  align-items:stretch;
+  gap:14px;
+  margin-bottom:16px;
+}
+.my-total{
+  padding:20px 22px;
+  border-radius:18px;
+  background:linear-gradient(135deg,#203f63,#315b84);
+  box-shadow:0 10px 24px #203f6318;
+}
+.my-total-top{min-height:34px;color:#eaf2fa}
+.my-total-title{display:flex;align-items:center;gap:10px}
+.my-total-title .eyebrow{color:#bfd0e2;font-size:11px;letter-spacing:0}
+.my-total-title>strong{font-size:14px;font-weight:650;color:#fff}
+.avatar-mini{width:32px;height:32px;border-radius:10px;background:#ffffff1c}
+.my-total-main{margin-top:14px}
+.my-total-main p{margin:0 0 2px;color:#c5d4e4;font-size:12px}
+.my-total-amount{font-size:30px;line-height:1.2;letter-spacing:-1px}
+.my-total-breakdown{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}
+.my-total-breakdown>div{gap:3px;padding:9px 11px;border:1px solid #ffffff18;border-radius:11px;background:#ffffff0b}
+.my-total-breakdown span{color:#c5d4e4;font-size:10px}
+.my-total-breakdown b{font-size:13px;color:#fff}
+.progress-line{height:5px;margin-top:13px;background:#ffffff2b}
+.progress-line span{background:#b7d7f3}
+.progress-caption{margin-top:7px;color:#c5d4e4;font-size:10px}
+.board-total{
+  min-height:0;
+  padding:20px 22px;
+  align-items:flex-start;
+  border-radius:18px;
+  background:#fff;
+  box-shadow:0 4px 14px #1b3c5d07;
+}
+.board-total span{font-size:12px;color:#74869a}
+.board-total strong{margin:7px 0 4px;font-size:27px;line-height:1.2;letter-spacing:-.7px;color:#203f63}
+.board-total small{font-size:11px;color:#8796a8}
+.panel{padding:20px 22px;border-radius:18px}
+.plan-panel .section-title,.expense-panel .section-title{margin-bottom:12px}
+.plan-panel .section-title .eyebrow,.expense-panel .section-title .eyebrow{display:block;margin-bottom:4px;font-size:10px;letter-spacing:.02em}
+.plan-panel .section-title h2,.expense-panel .section-title h2{font-size:18px;letter-spacing:-.45px}
+.plan-summary{font-size:11px;white-space:nowrap}
+.transfer-list,.expense-list{border-top:1px solid #edf1f5}
+.transfer-row{min-height:68px;padding:10px 2px;gap:12px}
+.transfer-people,.expense-main{gap:10px}
+.person-avatar,.expense-icon{width:36px;height:36px;border-radius:11px}
+.transfer-people strong,.expense-main strong{font-size:13px}
+.transfer-people small,.expense-main small{margin-top:3px;font-size:10px}
+.transfer-action{gap:12px}
+.transfer-action>strong,.expense-amount>strong{font-size:13px}
+.transfer-action .button.compact{min-height:36px;padding:0 13px;font-size:11px}
+.status-pill{padding:6px 9px;font-size:10px}
+.section-note{margin:11px 0 0;font-size:10px;line-height:1.5}
+.empty-inline{min-height:100px}
+.empty-inline>strong{font-size:13px}
+.empty-inline p{font-size:11px}
+.finance-tabs{
+  width:min(100%,520px);
+  margin:0 0 18px;
+  padding:4px;
+  border-radius:13px;
+}
+.finance-tabs a{padding:10px 14px;font-size:12px;text-align:center}
+@media(max-width:960px){
+  .settlement-board{grid-template-columns:1fr;gap:10px}
+  .my-total{padding:18px 20px}
+  .board-total{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;
+    column-gap:12px;
+    row-gap:2px;
+    padding:13px 16px;
+  }
+  .board-total span{grid-column:1;grid-row:1}
+  .board-total strong{grid-column:2;grid-row:1 / span 2;margin:0;font-size:22px}
+  .board-total small{grid-column:1;grid-row:2}
+}
+@media(max-width:700px){
+  .finance-tabs{width:100%;margin-bottom:14px}
+  .finance-tabs a{padding:10px 7px;font-size:11px}
+  .settlement-board{margin-bottom:12px}
+  .my-total{padding:17px;border-radius:16px}
+  .my-total-amount{font-size:27px}
+  .my-total-breakdown{margin-top:13px}
+  .my-total-breakdown>div{padding:8px 9px}
+  .panel{padding:17px 15px;border-radius:16px}
+  .plan-panel .section-title,.expense-panel .section-title{align-items:flex-end}
+  .plan-summary{font-size:10px}
+  .transfer-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:8px 10px;
+    padding:12px 0;
+  }
+  .transfer-people{grid-column:1/-1}
+  .transfer-action{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding-left:46px}
+  .expense-row{min-height:66px;padding:10px 0}
+}
+@media(max-width:390px){
+  .plan-panel .section-title{align-items:flex-start;flex-direction:column;gap:6px}
+  .plan-summary{max-width:none;text-align:left}
+  .transfer-people strong{font-size:12px}
+  .transfer-action{padding-left:44px}
+}

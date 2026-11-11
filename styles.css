@@ -222,3 +222,5 @@ dialog{border-radius:18px}
   .page-heading h1{font-size:29px}
   .space-card-status{font-size:10px;padding:7px}
 }
+.empty-inline>span{color:#557da6}
+.check-list input{accent-color:#315f91}

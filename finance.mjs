@@ -1,7 +1,7 @@
 import { auth } from './account.mjs';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.mjs';
 import { financeTotals } from './finance-model.mjs';
-import { recognizeReceipt } from './receipt-ocr.mjs';
+import { recognizeReceipt } from './receipt-ocr.mjs?v=20261118-ledger';
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => new Intl.NumberFormat('ko-KR').format(n)+'원';
 const labels = {submitted:'검토 대기',approved:'승인',changes:'보완 요청',rejected:'반려'};
@@ -15,7 +15,7 @@ async function api(room,action,payload={}) {
   if(!response.ok || result._status) throw Error(result.error || '요청을 처리하지 못했어요. 연결과 설정을 확인해 주세요.');
   return result;
 }
-export function mountFinance(root,trip,account) {
+export function mountFinance(root,trip,account,{readOnly=false}={}) {
   if(!root) return;
   if(!account) {root.innerHTML='<section class="panel"><h2>지출 제출과 공동 자금</h2><p class="help">로그인하고 계정에 연결된 장부에서 영수증 제출·검토·지급을 함께 관리하세요. 기존 개인 간 정산은 그대로 사용할 수 있어요.</p></section>';return;}
   let data, busy=false, timer, loadVersion=0;
@@ -36,6 +36,7 @@ export function mountFinance(root,trip,account) {
       const duplicate=data.entries.some(other=>other.id!==e.id && other.title===e.title && other.amount===e.amount && other.spent_on===e.spent_on && other.status!=='rejected');
       return `<article class="finance-entry"><div class="section-title"><strong>${esc(e.title)} · ${money(e.amount)}</strong><span class="status-pill">${labels[e.status]}${paid?' · 지급 완료':''}</span></div><p>${esc(person(e.member_id))} · ${esc(e.spent_on)} · ${e.payment==='personal'?'개인 돈으로 결제':'공동 자금으로 결제'}${e.event?' · '+esc(e.event):''}</p><p>${esc(e.purpose)}</p>${e.note?`<p class="warning">${esc(e.note)}</p>`:''}${duplicate?'<p class="warning">날짜·금액·이름이 같은 지출이 있어요. 중복인지 확인해 주세요.</p>':''}${e.has_receipt?button('receipt','영수증 보기',e.id):`<p class="help">미첨부 사유: ${esc(e.missing_reason)}</p>`}<div class="actions">${e.member_id===data.memberId && ['submitted','changes'].includes(e.status)?button('edit','수정·다시 제출',e.id):''}${data.manager && e.status==='submitted'?button('review','검토하기',e.id):''}${data.manager && e.status==='approved' && e.payment==='personal' && !paid?button('pay','지급 완료 기록',e.id):''}</div></article>`;
     }).join(''):'<p class="help">아직 제출된 지출이 없어요. 영수증과 사용 내역을 함께 남겨 주세요.</p>'}${data.manager?`<h3>공동 자금 입출금</h3><p class="help">공동 자금으로 결제한 승인 지출은 잔액에 자동 반영돼요. 같은 지출을 출금으로 다시 기록하지 마세요. 잔액은 입력 기록 기준이며 은행과 자동 연결되지 않아요.</p>${data.cash.map(c=>`<div class="summary-row"><span>${esc(c.title)} · ${{income:'입금',outflow:'기타 출금',reimbursement:'개인 지출 환급'}[c.kind]}</span><strong>${c.kind==='income'?'+':'−'}${money(c.amount)}</strong></div>`).join('')}`:''}<details><summary>처리 이력</summary>${data.history.map(h=>`<p class="help">${esc(new Date(h.created_at).toLocaleString('ko-KR'))} · ${esc(person(h.actor))} · ${esc(({submitted:'제출',approved:'승인',changes:'보완 요청',rejected:'반려',paid:'지급 완료',cash:'입출금 기록'})[h.action])} ${esc(h.note)}</p>`).join('')}</details></section>`;
+    if(readOnly)root.querySelectorAll('[data-finance]').forEach(b=>{if(!['refresh','receipt'].includes(b.dataset.finance))b.remove();});
   }
   const field=(label,name,value='',extra='')=>`<label>${label}<input name="${name}" value="${esc(value)}" ${extra}></label>`;
   function dialog(title,content,save){
@@ -57,6 +58,7 @@ export function mountFinance(root,trip,account) {
     const b=event.target.closest('[data-finance]');if(!b||busy)return;
     const action=b.dataset.finance,entry=data?.entries.find(e=>e.id===b.dataset.id);
     try{
+      if(readOnly&&!['refresh','receipt'].includes(action))return;
       if(action==='refresh')return await refresh();
       if(!data)return;
       if(action==='submit'||action==='edit'){

@@ -15,12 +15,40 @@ export function splitExpense(value, participants) {
   const total = amount(value);
   return participants.map((memberId, i) => ({ memberId, amount: Math.floor(total / participants.length) + (i < total % participants.length ? 1 : 0) }));
 }
+export const FUND_ID = '__fund__';
+const priorPayments = trip => (trip.settlementRecords || []).filter(r => r.ledger === true && r.planKey !== trip.settlementPlanRevision);
+export function fundBalance(trip) {
+  return priorPayments(trip).reduce((sum, r) => sum + (r.to === FUND_ID ? r.amount : 0) - (r.from === FUND_ID ? r.amount : 0), 0)
+    + (trip.fundEntries || []).reduce((sum, e) => sum + (e.kind === 'contribution' ? e.amount : -e.amount), 0)
+    - trip.expenses.filter(e => e.payment === 'fund').reduce((sum, e) => sum + e.amount, 0);
+}
 export function balances(trip) {
   return trip.members.map(member => {
-    const paid = trip.expenses.filter(e => e.payerId === member.id).reduce((s, e) => s + e.amount, 0);
+    const paid = trip.expenses.filter(e => e.payment !== 'fund' && e.payerId === member.id).reduce((s, e) => s + e.amount, 0);
     const share = trip.expenses.reduce((s, e) => s + (e.shares.find(p => p.memberId === member.id)?.amount || 0), 0);
-    return { ...member, paid, share, balance: paid - share };
+    const contributed = (trip.fundEntries || []).filter(e => e.memberId === member.id && e.kind === 'contribution').reduce((s, e) => s + e.amount, 0);
+    const refunded = (trip.fundEntries || []).filter(e => e.memberId === member.id && e.kind === 'refund').reduce((s, e) => s + e.amount, 0);
+    const settled = priorPayments(trip).reduce((sum, r) => sum + (r.from === member.id ? r.amount : 0) - (r.to === member.id ? r.amount : 0), 0);
+    return { ...member, paid, share, contributed, refunded, settled, balance: paid + contributed - refunded - share + settled };
   });
+}
+// Reject malformed ledger data on both client-independent server paths.
+export function validateLedger(trip) {
+  const members = new Set(trip.members.map(m => m.id));
+  if (members.has(FUND_ID)) throw Error('사용할 수 없는 멤버 ID예요.');
+  const entries = trip.fundEntries === undefined ? [] : trip.fundEntries;
+  if (!Array.isArray(entries) || entries.length > 2000) throw Error('공동 자금 내역을 확인해 주세요.');
+  const ids = new Set();
+  for (const entry of entries) {
+    if (!entry || typeof entry.id !== 'string' || !/^[\w-]{1,80}$/.test(entry.id) || ids.has(entry.id) || !members.has(entry.memberId)
+      || !['contribution', 'refund'].includes(entry.kind) || !Number.isSafeInteger(entry.amount) || entry.amount < 1 || entry.amount > 1e9
+      || !validDates(entry.date, entry.date)) throw Error('공동 자금 내역을 확인해 주세요.');
+    ids.add(entry.id);
+  }
+  for (const e of trip.expenses) {
+    if (e.payment !== undefined && !['personal', 'fund'].includes(e.payment)) throw Error('결제 방식을 확인해 주세요.');
+    if (e.spentOn !== undefined && !validDates(e.spentOn, e.spentOn)) throw Error('사용 날짜를 확인해 주세요.');
+  }
 }
 export const totalCost = trip => trip.expenses.reduce((s, e) => s + e.amount, 0);
 export const plannedCost = trip => trip.items.reduce((s, e) => s + e.estimate, 0);
@@ -46,7 +74,7 @@ export function demoTrip() {
 
 // A deterministic plan shared by everyone; the client filters it by its authenticated member ID.
 export function settlementPlan(trip) {
-  const rows = balances(trip);
+  const rows = [...balances(trip), { id: FUND_ID, balance: -fundBalance(trip) }];
   const creditors = rows.filter(m => m.balance > 0).map(m => ({ id: m.id, left: m.balance }));
   const debtors = rows.filter(m => m.balance < 0).map(m => ({ id: m.id, left: -m.balance }));
   const transfers = [];
@@ -67,7 +95,7 @@ export function settlementPlan(trip) {
 // have no revision token, so their expense content provides a stable fallback.
 export function settlementPlanKey(trip) {
   if (typeof trip.settlementPlanRevision === 'string' && trip.settlementPlanRevision) return trip.settlementPlanRevision;
-  return JSON.stringify({ expenses: trip.expenses, plan: settlementPlan(trip) });
+  return JSON.stringify({ expenses: trip.expenses, fundEntries: trip.fundEntries, plan: settlementPlan(trip) });
 }
 
 export function settlementProgress(trip) {

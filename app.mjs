@@ -1,6 +1,6 @@
-import { mountFinance } from './finance.mjs';
-import { recognizeReceipt } from './receipt-ocr.mjs';
-import { STATUS, uid, amount, splitExpense, balances, totalCost, newTrip, settlementPlan, settlementProgress } from './model.mjs';
+import { mountFinance } from './finance.mjs?v=20261118-ledger';
+import { recognizeReceipt } from './receipt-ocr.mjs?v=20261118-ledger';
+import { STATUS, uid, amount, splitExpense, balances, totalCost, newTrip, settlementPlan, settlementProgress, FUND_ID, fundBalance } from './model.mjs?v=20261118-ledger';
 import { auth } from './account.mjs';
 import { SESSION_KEY, request, subscribe, CONNECTION_LABEL } from './shared.mjs';
 const $ = s => document.querySelector(s);
@@ -10,6 +10,8 @@ const KEY = 'moa.prototype.v1';
 let state = { trips: [] }, storageBlocked = false, activeSubmit, activeVersion, toastTimer;
 let sessions = {}, stopStream, streamingId, inviteInfo, inviteError = '', submitting = false;
 const connectionStatus = {};
+const today = () => new Date().toLocaleDateString('sv-SE');
+const cameraIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h3a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="12.5" r="4"/></svg>';
 let authUser = null, currentProfile = null, accountEpoch = 0;
 const AVATARS = ['🌿','🐻','🐱','🐶','🐰','🦊','🐼','🐧'];
 const tripPath = t => `${sessions[t.id]?.account ? '/account' : ''}/trips/${t.id}`;
@@ -69,8 +71,8 @@ async function update(fn) {
 const tripById = id => state.trips.find(t => t.id === id);
 const currentTrip = () => tripById(location.hash.split('/')[1]);
 const btn = (action, label, id = '', klass = 'button') => `<button type="button" class="${klass}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
-function cards() { return `<div class="cards">${state.trips.map(t => { const open=settlementProgress(t).filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0); return `<a class="group-card" href="#trip/${t.id}" aria-label="${esc(t.title)} Space 열기"><div class="group-card-top"><span class="group-icon">${esc((t.title||'모').slice(0,1))}</span><span class="space-card-open" aria-hidden="true">↗</span></div><span class="space-card-kicker">MOA Space</span><h2>${esc(t.title)}</h2><p class="space-card-members">${t.members.length}명 참여 <span aria-hidden="true">·</span> 지출 ${t.expenses.length}건</p><div class="space-card-bottom"><div class="space-card-total"><small>함께 쓴 금액</small><strong>${money(totalCost(t))}</strong></div><span class="space-card-status ${open?'is-pending':'is-settled'}">${open?`정산 대기 ${money(open)}`:'정산 완료'}</span></div></a>`; }).join('')}<button class="new-card" data-action="create-trip"><span class="plus">+</span><strong>새 Space 만들기</strong><small>친구를 초대하고 지출과 정산을 함께 관리해요</small></button></div>`; }
-function home() { return `<div class="page-heading"><div><span class="eyebrow">함께 쓰는 돈의 공간</span><h1>MOA Space</h1><p>친구들과 공동의 돈을 한 공간에서 관리해요.</p></div>${btn('create-trip','＋ 새 Space 만들기')}</div><section class="group-section"><div class="section-title"><h2>내 Space <span>${state.trips.length}</span></h2></div>${state.trips.length?cards():`<div class="empty-state"><span class="empty-icon" aria-hidden="true">✦</span><h2>아직 Space가 없어요</h2><p>Space를 만들고 친구를 초대해<br>함께 쓴 돈과 정산 내역을 관리해 보세요.</p>${btn('create-trip','첫 Space 만들기')}</div>`}</section>`; }
+function cards() { return `<div class="cards">${state.trips.map(t => { const open=settlementProgress(t).filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0); return `<a class="group-card" href="#trip/${t.id}" aria-label="${esc(t.title)} Space 열기"><div class="group-card-top"><span class="group-icon">${esc((t.title||'모').slice(0,1))}</span><span class="space-card-open" aria-hidden="true">↗</span></div><span class="space-card-kicker">MOA Space</span><h2>${esc(t.title)}</h2><p class="space-card-members">${t.members.length}명 참여 <span aria-hidden="true">·</span> 지출 ${t.expenses.length}건</p><div class="space-card-bottom"><div class="space-card-total"><small>함께 쓴 금액</small><strong>${money(totalCost(t))}</strong></div><span class="space-card-status ${open?'is-pending':'is-settled'}">${open?`정산 대기 ${money(open)}`:'정산 완료'}</span></div></a>`; }).join('')}<button class="new-card" data-action="create-trip"><span class="plus">+</span><strong>새 Space 만들기</strong><small>함께 쓴 돈을 모아보세요</small></button></div>`; }
+function home() { return `<div class="page-heading"><div><span class="eyebrow">함께 쓰는 돈의 공간</span><h1>MOA Space</h1><p>영수증부터 정산까지, 한곳에서.</p></div>${btn('create-trip','＋ 새 Space 만들기')}</div><section class="group-section"><div class="section-title"><h2>내 Space <span>${state.trips.length}</span></h2></div>${state.trips.length?cards():`<div class="empty-state"><span class="empty-icon" aria-hidden="true">✦</span><h2>아직 Space가 없어요</h2><p>Space를 만들고 친구를 초대해<br>함께 쓴 돈과 정산 내역을 관리해 보세요.</p>${btn('create-trip','첫 Space 만들기')}</div>`}</section>`; }
 function mySettlement(t) {
   const me = balances(t).find(m => m.id === (sessions[t.id]?.memberId || t.members[0].id));
   const transfers = settlementProgress(t).filter(p => p.from === me.id || p.to === me.id);
@@ -82,7 +84,7 @@ function mySettlement(t) {
   const pendingReceived=transfers.filter(p=>p.to===me.id&&!p.completed).reduce((sum,p)=>sum+p.amount,0);
   const headline=pendingSent?['보낼 금액',money(pendingSent)]:pendingReceived?['받을 금액',money(pendingReceived)]:['정산 완료',money(0)];
   const progress=sent+received?Math.round(completed/(sent+received)*100):100;
-  return `<section class="my-total"><div class="my-total-top"><div class="my-total-title"><span class="eyebrow">내 정산</span><strong>${esc(me.name)}님</strong></div><span class="avatar-mini">${esc(me.avatar||'')}</span></div><div class="my-total-main"><p>${headline[0]}</p><strong class="my-total-amount">${headline[1]}</strong></div><div class="my-total-breakdown"><div><span>보내기로 한 금액</span><b>${money(sent)}</b></div><div><span>받기로 한 금액</span><b>${money(received)}</b></div></div><div class="progress-line" role="progressbar" aria-label="내 정산 완료율" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><div class="progress-caption"><span>정산 완료 ${progress}%</span><span>남은 금액 ${money(pending)}</span></div></section>`;
+  return `<section class="my-total ${pendingSent?'is-send':pendingReceived?'is-receive':''}"><div class="my-total-top"><div class="my-total-title"><span class="eyebrow">내 정산</span><strong>${esc(me.name)}님</strong></div><span class="avatar-mini">${esc(me.avatar||'')}</span></div><div class="my-total-main"><p>${headline[0]}</p><strong class="my-total-amount">${headline[1]}</strong></div><div class="my-total-breakdown"><div><span>보내기로 한 금액</span><b>${money(sent)}</b></div><div><span>받기로 한 금액</span><b>${money(received)}</b></div></div><div class="progress-line" role="progressbar" aria-label="내 정산 완료율" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><div class="progress-caption"><span>정산 완료 ${progress}%</span><span>남은 금액 ${money(pending)}</span></div></section>`;
 }
 function loginButtons() {
   return `<div class="login-buttons">${btn('login-kakao','카카오로 계속하기','','button kakao')}${btn('login-google','구글로 계속하기','','button google')}</div>`;
@@ -190,10 +192,21 @@ function inviteForm(t) {
 }
 function tripView(t) {
   const meId=sessions[t.id]?.memberId||t.members[0].id;
-  const plan=settlementProgress(t), completed=plan.filter(p=>p.completed).reduce((sum,p)=>sum+p.amount,0), pending=plan.filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0);
-  const person=id=>esc(t.members.find(m=>m.id===id)?.name||'참여자');
-  const inviteAllowed=!sessions[t.id]||sessions[t.id].memberId===sessions[t.id].ownerId;
-  return `<a class="back" href="#home">← 내 Space</a><header class="group-header"><div><span class="eyebrow">MOA Space</span><h1>${esc(t.title)}</h1><div class="members">${t.members.map(m=>`<span class="member-chip">${esc(m.avatar||'')} ${esc(m.name)}${m.id===meId?' · 나':''}</span>`).join('')}<span id="sync-status" class="sync-status" role="status">${syncLabel(t)}</span></div></div>${inviteAllowed?btn('invite','친구 초대','','button secondary'):''}</header><nav class="finance-tabs" aria-label="Space 메뉴"><a href="#trip/${t.id}" ${location.hash.split('/')[2]!=='finance'?'aria-current="page"':''}>개인 간 정산</a><a href="#trip/${t.id}/finance" ${location.hash.split('/')[2]==='finance'?'aria-current="page"':''}>지출·공동 자금</a></nav>${location.hash.split('/')[2]==='finance'?'<div id="finance-root"></div>':`<section class="settlement-board">${mySettlement(t)}<div class="board-total"><span>함께 쓴 금액</span><strong>${money(totalCost(t))}</strong><small>${t.expenses.length}건의 지출 · ${t.members.length}명 참여</small></div></section><section class="panel plan-panel"><div class="section-title"><div><span class="eyebrow">정산</span><h2>송금할 내역</h2></div><span class="plan-summary">완료 ${money(completed)} <i>·</i> 남음 ${money(pending)}</span></div>${plan.length?`<div class="transfer-list">${plan.map(p=>`<article class="transfer-row"><div class="transfer-people"><span class="person-avatar">${esc((t.members.find(m=>m.id===p.from)?.name||' ')[0])}</span><div><strong>${person(p.from)} <span class="arrow-inline">→</span> ${person(p.to)}</strong><small>${p.completed?'송금 완료':'송금 전'}</small></div></div><div class="transfer-action"><strong>${money(p.amount)}</strong>${p.from===meId?(p.completed?btn('toggle-settlement','완료 취소',`${p.from}:${p.to}:${p.amount}`,'button secondary compact'):btn('toggle-settlement','보냈어요',`${p.from}:${p.to}:${p.amount}`,'button compact')):`<span class="status-pill ${p.completed?'is-done':''}">${p.completed?'완료':'대기 중'}</span>`}</div></article>`).join('')}</div>`:`<div class="empty-inline"><span>✓</span><strong>${t.expenses.length?'모두 정산됐어요':'지출을 추가하면 정산 내역이 보여요'}</strong></div>`}<p class="section-note">완료 표시는 송금한 사람이 직접 남긴 기록이에요. 실제 송금 여부를 확인하는 기능은 아닙니다.</p></section><section class="panel expense-panel"><div class="section-title"><div><span class="eyebrow">함께 쓴 지출</span><h2>지출 내역</h2></div>${btn('create-expense','＋ 지출 추가','','button secondary')}</div>${t.expenses.length?`<div class="expense-list">${t.expenses.map(e=>`<article class="expense-row"><div class="expense-main"><span class="expense-icon">₩</span><div><strong>${esc(e.title)}</strong><small>${person(e.payerId)} 결제 · ${e.spentOn?`${esc(e.spentOn)} · `:''}${e.shares.length}명 참여</small></div></div><div class="expense-amount"><strong>${money(e.amount)}</strong><span>${btn('edit-expense','수정',e.id,'text-button')}${btn('delete-expense','삭제',e.id,'text-button danger-text')}</span></div></article>`).join('')}</div>`:`<div class="empty-inline"><span>₩</span><strong>아직 등록한 지출이 없어요</strong><p>함께 쓴 금액부터 기록해 보세요.</p>${btn('create-expense','첫 지출 추가')}</div>`}</section>`}`;
+  const plan=settlementProgress(t), pending=plan.filter(p=>!p.completed).reduce((sum,p)=>sum+p.amount,0);
+  const person=id=>id===FUND_ID?'공동 자금':esc(t.members.find(m=>m.id===id)?.name||'참여자');
+  const ownerId=sessions[t.id]?.ownerId||t.members[0].id;
+  const inviteAllowed=!sessions[t.id]||meId===ownerId;
+  const section=location.hash.split('/')[2]||'activity';
+  const isSettlement=section==='settlement', isHistory=['finance','history'].includes(section);
+  const available=fundBalance(t)+plan.filter(p=>p.completed).reduce((sum,p)=>sum+(p.to===FUND_ID?p.amount:0)-(p.from===FUND_ID?p.amount:0),0);
+  const activity=[...t.expenses.map(e=>({...e,type:'expense',date:e.spentOn||t.start})),...(t.fundEntries||[]).map(e=>({...e,type:'fund'}))].sort((a,b)=>b.date.localeCompare(a.date));
+  const myBalance=balances(t).find(m=>m.id===meId);
+  const transfers=plan.filter(p=>p.from===meId||p.to===meId);
+  const myPending=transfers.filter(p=>!p.completed).reduce((sum,p)=>sum+(p.to===meId?p.amount:-p.amount),0);
+  const settlement=`<section class="settlement-board">${mySettlement(t)}<div class="board-total"><span>남은 공동 자금</span><strong>${money(available)}</strong><small>보관 · ${person(ownerId)}님</small></div></section><section class="panel plan-panel"><div class="section-title"><h2>주고받을 돈</h2><span class="status-pill ${pending?'':'is-done'}">${pending?'정산 중':'완료'}</span></div>${plan.length?`<div class="transfer-list">${plan.map(p=>`<article class="transfer-row"><div class="transfer-people"><span class="person-avatar ${p.from===FUND_ID?'fund-badge':''}">${p.from===FUND_ID?'₩':person(p.from).slice(0,1)}</span><div><strong>${person(p.from)} <span class="arrow-inline">→</span> ${person(p.to)}</strong><small>${p.completed?'완료':p.from===FUND_ID?'공동 자금에서 돌려주기':p.to===FUND_ID?'공동 자금에 넣기':'개인 간 송금'}</small></div></div><div class="transfer-action"><strong>${money(p.amount)}</strong>${(p.from===FUND_ID?ownerId:p.from)===meId?btn('toggle-settlement',p.completed?'완료 취소':p.from===FUND_ID?'돌려줬어요':'보냈어요',`${p.from}:${p.to}:${p.amount}`,p.completed?'button secondary compact':'button compact'):`<span class="status-pill ${p.completed?'is-done':''}">${p.completed?'완료':'대기'}</span>`}</div></article>`).join('')}</div>`:'<div class="empty-inline"><span>✓</span><strong>주고받을 돈이 없어요</strong></div>'}<details class="calculation"><summary>계산 내역</summary><div class="summary-row"><span>내가 모은 돈</span><strong>${money(myBalance.contributed)}</strong></div><div class="summary-row"><span>내 돈으로 결제</span><strong>${money(myBalance.paid)}</strong></div><div class="summary-row"><span>이미 돌려받은 돈</span><strong>${money(myBalance.refunded)}</strong></div><div class="summary-row"><span>내가 부담할 돈</span><strong>${money(myBalance.share)}</strong></div>${myBalance.settled?`<div class="summary-row"><span>이전 정산 반영</span><strong>${money(myBalance.settled)}</strong></div>`:''}<p class="help">직접 송금한 뒤 완료 표시를 남겨 주세요. 새로 기록한 송금은 지출이 바뀌어도 정산에 반영돼요.</p></details></section>`;
+  return `<a class="back" href="#home">← 내 Space</a><header class="group-header"><div><span class="eyebrow">MOA Space</span><h1>${esc(t.title)}</h1><div class="members">${t.members.map(m=>`<span class="member-chip">${esc(m.avatar||'')} ${esc(m.name)}${m.id===meId?' · 나':''}</span>`).join('')}<span id="sync-status" class="sync-status" role="status">${syncLabel(t)}</span></div></div>${inviteAllowed?btn('invite','＋ 초대','','button secondary'):''}</header>
+  ${isHistory?`<a class="back" href="#trip/${t.id}">← 현재 장부</a><p class="warning">이전 공동 자금 기록이에요. 현재 장부의 잔액·정산에는 포함되지 않아요.</p><div id="finance-root"></div>`:isSettlement?settlement:`<section class="ledger-summary"><div><span>남은 돈</span><strong class="${available<0?'money-warning':''}">${money(available)}</strong><span class="fund-dot">공동 자금</span></div><div><span>쓴 돈</span><strong>${money(totalCost(t))}</strong><span>${t.expenses.length}건</span></div></section><button type="button" class="capture-hero" data-action="capture-receipt">${cameraIcon}<span>영수증 찍기<small>찍고, 확인하면 기록 끝</small></span><span class="capture-plus">＋</span></button><div class="quick-actions">${btn('create-expense','직접 입력','','text-button')}${btn('fund-entry','＋ 돈 모으기','','text-button')}${btn('refund-entry','돌려준 돈','','text-button')}</div><a href="#trip/${t.id}/settlement" class="my-balance-link ${myPending>0?'is-receive':myPending<0?'is-send':''}"><span>내 정산</span><strong>${myPending>0?`${money(myPending)} 받아요`:myPending<0?`${money(-myPending)} 보내요`:'주고받을 돈이 없어요'}</strong><span aria-hidden="true">↗</span></a><section class="panel activity-panel"><div class="section-title"><h2>내역 <small>${activity.length}</small></h2></div>${activity.length?`<div class="expense-list">${activity.map(e=>`<article class="expense-row ledger-row"><span class="expense-icon ${e.type==='fund'?'fund-badge':''}">${e.type==='fund'?(e.kind==='contribution'?'↓':'↑'):'▧'}</span><div class="ledger-row-body"><strong class="ledger-amount">${e.type==='fund'?(e.kind==='contribution'?'+':'−'):''}${money(e.amount)}</strong><div class="ledger-row-meta"><span class="payment-badge ${e.type==='fund'||e.payment==='fund'?'fund-badge':'personal-badge'}">${e.type==='fund'?(e.kind==='contribution'?'모은 돈':'돌려준 돈'):e.payment==='fund'?'공동 자금':`${person(e.payerId)} 결제`}</span><span>${e.type==='fund'?person(e.memberId):`${e.shares.length}명`}</span><time>${esc(e.date.slice(5).replace('-','.'))}</time></div>${e.type==='expense'&&e.title!=='지출'?`<small class="ledger-note">${esc(e.title)}</small>`:''}</div><div class="row-actions">${e.type==='expense'?btn('edit-expense','수정',e.id,'text-button'):''}${btn(e.type==='expense'?'delete-expense':'delete-fund','삭제',e.id,'text-button danger-text')}</div></article>`).join('')}</div>`:'<div class="empty-inline"><span>▧</span><strong>첫 영수증을 찍어보세요</strong></div>'}</section>${sessions[t.id]?.account?`<a class="legacy-link" href="#trip/${t.id}/history">이전 공동 자금 기록 ↗</a>`:''}`}
+  <nav class="ledger-nav" aria-label="Space 메뉴"><a href="#trip/${t.id}" ${!isSettlement&&!isHistory?'aria-current="page"':''}><span aria-hidden="true">☷</span>내역</a><button type="button" data-action="capture-receipt" aria-label="영수증 찍기">${cameraIcon}<span>촬영</span></button><a href="#trip/${t.id}/settlement" ${isSettlement?'aria-current="page"':''}><span aria-hidden="true">⇄</span>정산</a></nav>`;
 }
 function render() {
   const route = location.hash.slice(1).split('/')[0] || 'home';
@@ -202,41 +215,72 @@ function render() {
   const connection=$('.global-sync');
   if(connection) connection.textContent=t?syncLabel(t):'친구들과 함께 관리해요';
   $('#main').innerHTML = (storageBlocked?'<div class="warning">저장된 데이터를 읽을 수 없어요. 기존 기록 보호를 위해 변경을 중단했습니다. 브라우저 저장소 설정을 확인해 주세요.</div>':'') + (route==='invite' ? invitationView() : route==='trip' ? (t?tripView(t):'<div class="empty-state"><h2>Space를 찾을 수 없어요</h2><a href="#home">내 Space로 돌아가기</a></div>') : home());
-  if(t && route==='trip' && location.hash.split('/')[2]==='finance') mountFinance($('#finance-root'),t,Boolean(sessions[t.id]?.account));
+  if(t && route==='trip' && ['finance','history'].includes(location.hash.split('/')[2])) mountFinance($('#finance-root'),t,Boolean(sessions[t.id]?.account),{readOnly:true});
 }
-function open(title, fields, submit) { activeVersion = sessions[currentTrip()?.id]?.version; $('#editor-form [type="submit"]').hidden = false; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#form-error').textContent=''; activeSubmit=submit; $('#editor').showModal(); }
+function open(title, fields, submit) { $('#editor-form').oninput=null; $('#editor-form [type="submit"]').textContent='저장하기'; activeVersion = sessions[currentTrip()?.id]?.version; $('#editor-form [type="submit"]').hidden = false; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#form-error').textContent=''; activeSubmit=submit; $('#editor').showModal(); }
 function input(label,name,value='',type='text',extra='') { return `<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`; }
-function tripForm() { open('새 Space 만들기',`${input('공간 이름','title','','text','required maxlength="80" placeholder="예: 제주 모임"')}${authUser?'<p class="help">Space를 만든 뒤 초대 링크를 친구에게 공유하세요.</p>':input('내 이름','myName','나','text','required maxlength="80" placeholder="Space에서 사용할 이름"')}<p class="help">지출과 송금 내역은 친구들과 함께 확인할 수 있어요.</p>`,async data=>{const today=new Date();const dateValue=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;const t=newTrip({title:data.get('title'),destination:'모임 정산',start:dateValue,end:dateValue,myName:authUser?(currentProfile?.name||'나'):data.get('myName')});if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;}if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`;return true;}}); }
-function expenseForm(t,id) {
-  const old=t.expenses.find(e=>e.id===id);
+function tripForm() {
+  open('새 Space',`${input('공간 이름','title','','text','required maxlength="80" placeholder="예: 우리 제주 여행"')}${authUser?'':input('내 이름','myName','나','text','required maxlength="80"')}${input('내가 넣고 시작할 돈','initialFund',0,'number','min="0" max="1000000000" step="1"')}<p class="help">공동 자금이 없으면 0원. 친구가 참여하면 낸 돈을 추가할 수 있어요.</p>`,async data=>{
+    const dateValue=today();
+    const t=newTrip({title:data.get('title'),destination:'모임 정산',start:dateValue,end:dateValue,myName:authUser?(currentProfile?.name||'나'):data.get('myName')});
+    const initial=amount(data.get('initialFund'));
+    t.fundEntries=initial?[{id:uid(),kind:'contribution',memberId:t.members[0].id,amount:initial,date:dateValue}]:[];
+    if(authUser){if(!currentProfile)throw new Error('먼저 내 프로필을 설정해 주세요.');const userId=authUser.id;const created=await request('/account/trips',{method:'POST',data:{trip:t}});if(authUser?.id!==userId)return false;acceptAccountSnapshot(created,userId);location.hash=`trip/${created.trip.id}`;return true;}
+    if(await update(s=>s.trips.push(t))){location.hash=`trip/${t.id}`;return true;}
+  });
+}
+function fundForm(t,kind='contribution') {
   const meId=sessions[t.id]?.memberId||t.members[0].id;
-  const meName=t.members.find(m=>m.id===meId)?.name||'나';
-  const allCount=old?old.shares.length:t.members.length;
-  const fields=`<label class="receipt-picker" for="f-receipt-photo"><span class="receipt-picker-icon" aria-hidden="true">▧</span><span><strong>영수증 찍기 / 사진 선택</strong><small>가게명·금액·날짜를 자동으로 입력해요</small></span><input id="f-receipt-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><p class="receipt-status" data-expense-ocr role="status" aria-live="polite">사진은 인식에만 사용하고 저장하지 않아요.</p>${input('무엇을 결제했나요?','title',old?.title||'','text','required maxlength="100" placeholder="예: 저녁 식사"')}${input('금액 (원)','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0"')}<details class="expense-options" ${old?'open':''}><summary>정산 설정 <small>기본: ${allCount}명 참여 · ${esc(meName)}님 결제</small></summary><div class="expense-options-body">${input('사용 날짜 (선택)','spentOn',old?.spentOn||'','date')}<label for="f-payerId">결제자</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${esc(m.id)}" ${(old?.payerId||meId)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select><label>정산에 포함할 사람</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${esc(m.id)}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="help">선택한 사람끼리 금액을 똑같이 나눠요. 기본값은 Space 멤버 전원이에요.</p></div></details>`;
-  open(old?'지출 수정':'지출 추가',fields,data=>{
-    const title=String(data.get('title')||'').trim();
-    if(!title) throw Error('가게명이나 지출 내용을 입력해 주세요.');
-    const value=amount(data.get('amount'));
-    const expense={id:old?.id||uid(),title,amount:value,itemId:old?.itemId||null,payerId:data.get('payerId'),shares:splitExpense(value,data.getAll('participants'))};
-    const spentOn=String(data.get('spentOn')||'');if(spentOn)expense.spentOn=spentOn;
-    return update(s=>{const trip=s.trips.find(x=>x.id===t.id); if(old) trip.expenses[trip.expenses.findIndex(e=>e.id===id)]=expense; else trip.expenses.push(expense); trip.settlementPlanRevision=uid();});
+  open(kind==='contribution'?'돈 모으기':'돌려준 돈',`${input('금액 (원)','amount','','number','required min="1" max="1000000000" step="1" placeholder="0"')}<label for="f-memberId">${kind==='contribution'?'누가 냈나요?':'누가 받았나요?'}</label><select id="f-memberId" name="memberId">${t.members.map(m=>`<option value="${esc(m.id)}" ${m.id===meId?'selected':''}>${esc(m.name)}</option>`).join('')}</select>${input('날짜','date',today(),'date','required')}<p class="help">${kind==='contribution'?'공동 자금에 실제로 넣은 돈을 기록해요.':'공동 자금에서 이미 돌려준 돈만 기록해요.'}</p>`,data=>{
+    const value=amount(data.get('amount'));if(!value)throw Error('1원 이상 입력해 주세요.');
+    return update(s=>{const trip=s.trips.find(x=>x.id===t.id);trip.fundEntries||=[];trip.fundEntries.push({id:uid(),kind,memberId:data.get('memberId'),amount:value,date:data.get('date')});trip.settlementPlanRevision=uid();});
   });
-  const dialog=$('#editor'),photo=$('#f-receipt-photo'),status=$('[data-expense-ocr]'),save=dialog.querySelector('[type="submit"]');
-  photo.addEventListener('change',async()=>{
-    const file=photo.files?.[0];if(!file)return;
-    if(file.size>12582912||!['image/jpeg','image/png','image/webp'].includes(file.type)){status.textContent='12MB 이하 JPG·PNG·WebP 사진을 선택해 주세요.';return;}
-    photo.disabled=true;save.disabled=true;status.textContent='영수증을 읽고 있어요. 처음 사용하면 준비에 시간이 조금 더 걸릴 수 있어요.';
+}
+function expenseForm(t,id,capture=false) {
+  const old=t.expenses.find(e=>e.id===id), meId=sessions[t.id]?.memberId||t.members[0].id;
+  const selectedPayment=old?.payment||(fundBalance(t)>0?'fund':'personal');
+  const fields=`<label class="receipt-picker receipt-main" for="f-receipt-photo">${cameraIcon}<span><strong>${old?'영수증 다시 읽기':'영수증 찍기'}</strong><small>사진 선택도 가능해요</small></span><input id="f-receipt-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><label class="receipt-gallery" for="f-receipt-gallery">사진에서 가져오기<input id="f-receipt-gallery" type="file" accept="image/jpeg,image/png,image/webp"></label><p class="receipt-status" data-expense-ocr role="status" aria-live="polite"></p><div class="amount-field">${input('금액','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0" inputmode="numeric"')}<span>원</span></div><label>어떤 돈으로 냈나요?</label><div class="payment-options"><label><input type="radio" name="payment" value="fund" ${selectedPayment==='fund'?'checked':''}><span>공동 자금</span></label><label><input type="radio" name="payment" value="personal" ${selectedPayment==='personal'?'checked':''}><span>개인 돈</span></label></div><div data-payer-field><label for="f-payerId">결제한 사람</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${esc(m.id)}" ${(old?.payerId||meId)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div><label>함께 부담할 사람</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${esc(m.id)}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="split-preview" data-split-preview></p><p class="duplicate-note" data-duplicate hidden></p><details class="expense-options"><summary>상세 정보</summary><div class="expense-options-body">${input('사용 날짜','spentOn',old?.spentOn||today(),'date','required')}${input('메모 (선택)','title',old?.title==='지출'?'':old?.title||'','text','maxlength="100" placeholder="자동으로 읽은 가게명 또는 메모"')}<p class="help">사진은 인식에만 사용하고 저장하지 않아요.</p></div></details>`;
+  let duplicateAccepted=false;
+  open(old?'지출 수정':'지출 기록',fields,data=>{
+    const value=amount(data.get('amount'));if(!value)throw Error('1원 이상 입력해 주세요.');
+    const date=data.get('spentOn');
+    const duplicate=t.expenses.find(e=>e.id!==old?.id&&e.amount===value&&e.spentOn===date);
+    if(duplicate&&!duplicateAccepted){duplicateAccepted=true;const note=$('[data-duplicate]');note.hidden=false;note.textContent='같은 날짜·금액이 있어요. 새 지출이면 한 번 더 기록해 주세요.';return false;}
+    const expense={id:old?.id||uid(),title:String(data.get('title')||'').trim()||'지출',amount:value,itemId:old?.itemId||null,payerId:data.get('payerId'),payment:data.get('payment'),spentOn:date,shares:splitExpense(value,data.getAll('participants'))};
+    return update(s=>{const trip=s.trips.find(x=>x.id===t.id);if(old)trip.expenses[trip.expenses.findIndex(e=>e.id===id)]=expense;else trip.expenses.push(expense);trip.settlementPlanRevision=uid();});
+  });
+  const dialog=$('#editor'),form=$('#editor-form'),photo=$('#f-receipt-photo'),gallery=$('#f-receipt-gallery'),status=$('[data-expense-ocr]'),save=dialog.querySelector('[type="submit"]');
+  save.textContent='기록하기';
+  const refresh=()=>{
+    duplicateAccepted=false;$('[data-duplicate]').hidden=true;
+    const count=form.querySelectorAll('[name="participants"]:checked').length,value=Number($('#f-amount').value);
+    $('[data-split-preview]').textContent=count&&value>0?`${count}명 · 1인 ${money(Math.floor(value/count))}${value%count?'부터':''}`:'함께 부담할 사람을 선택해 주세요';
+    $('[data-payer-field]').hidden=form.querySelector('[name="payment"]:checked').value==='fund';
+  };
+  form.oninput=refresh;refresh();
+  let reading=false;
+  const readPhoto=async event=>{
+    const file=event.currentTarget.files?.[0];if(!file||reading)return;
+    if(file.size>12582912||!['image/jpeg','image/png','image/webp'].includes(file.type)){status.textContent='12MB 이하 JPG·PNG·WebP 사진을 선택해 주세요.';status.className='receipt-status needs-check';return;}
+    reading=true;photo.disabled=true;gallery.disabled=true;save.disabled=true;status.className='receipt-status is-reading';status.textContent='영수증 준비 중…';
+    const thisFields=$('#dialog-fields').firstElementChild;
+    const active=()=>dialog.open&&thisFields.isConnected;
     try{
-      const found=await recognizeReceipt(file,progress=>{status.textContent=`영수증을 읽고 있어요… ${Math.round(progress*100)}%`;});
-      if(!dialog.open)return;
+      const found=await recognizeReceipt(file,progress=>{if(active())status.textContent=`읽는 중 ${Math.round(progress*100)}%`;});
+      if(!active())return;
       if(found.title)$('#f-title').value=found.title;
-      if(found.amount)$('#f-amount').value=found.amount;
-      if(found.spent_on){$('#f-spentOn').value=found.spent_on;$('.expense-options').open=true;}
-      const missing=[];if(!found.title)missing.push('가게명');if(!found.amount)missing.push('금액');if(!found.spent_on)missing.push('날짜');
-      status.textContent=missing.length?`읽기를 마쳤어요. ${missing.join('·')}은 직접 입력하거나 정산 설정에서 확인해 주세요.`:'읽기를 마쳤어요. 가게명·금액·날짜를 확인한 뒤 저장해 주세요.';
-    }catch(error){status.textContent='인식하지 못했어요. 사진을 다시 선택하거나 내용을 직접 입력해 주세요.';console.error('Receipt OCR failed',error);}
-    finally{if(photo.isConnected)photo.disabled=false;if(save.isConnected)save.disabled=false;}
-  });
+      $('#f-amount').value=found.amount||'';
+      if(found.spent_on)$('#f-spentOn').value=found.spent_on;
+      const uncertain=!found.amount||found.amountConfidence==='low';
+      status.className=`receipt-status ${uncertain?'needs-check':'is-ready'}`;
+      status.textContent=uncertain?'금액을 확인해 주세요':found.spent_on?'✓ 금액을 확인하고 기록하세요':'✓ 금액 확인 · 날짜도 확인해 주세요';
+      $('#f-amount').classList.toggle('needs-check',uncertain);
+      refresh();$('#f-amount').focus();
+    }catch(error){if(active()){status.textContent='다시 찍거나 금액을 입력해 주세요';status.className='receipt-status needs-check';}console.error('Receipt OCR failed',error);}
+    finally{reading=false;if(photo.isConnected)photo.disabled=false;if(gallery.isConnected)gallery.disabled=false;if(save.isConnected)save.disabled=false;}
+  };
+  photo.addEventListener('change',readPhoto);gallery.addEventListener('change',readPhoto);
+  if(capture)photo.click();
 }
 function confirmAction(title,message,action) { open(title,`<p>${esc(message)}</p>`,()=>update(action)); }
 document.addEventListener('click',async e=>{
@@ -281,17 +325,20 @@ document.addEventListener('click',async e=>{
   if(action==='create-trip')return tripForm();
   if(!t)return;
   if(action==='invite')return inviteForm(t);
+  if(action==='capture-receipt')return expenseForm(t,null,true);
+  if(action==='fund-entry'||action==='refund-entry')return fundForm(t,action==='fund-entry'?'contribution':'refund');
+  if(action==='delete-fund')return confirmAction('이 기록을 삭제할까요?','잔액과 정산 금액이 다시 계산돼요.',s=>{const trip=s.trips.find(x=>x.id===t.id);trip.fundEntries=(trip.fundEntries||[]).filter(e=>e.id!==id);trip.settlementPlanRevision=uid();});
   if(['create-expense','edit-expense'].includes(action))return expenseForm(t,action==='edit-expense'?id:null);
   if(action==='delete-expense')return confirmAction('이 지출을 삭제할까요?','삭제하면 멤버별 부담 금액도 다시 계산됩니다.',s=>{const trip=s.trips.find(x=>x.id===t.id);trip.expenses=trip.expenses.filter(e=>e.id!==id);trip.settlementPlanRevision=uid();});
   if(action==='toggle-settlement') {
     const session=sessions[t.id], memberId=session?.memberId || t.members[0].id;
     const [from,to,amountText]=id.split(':'), value=Number(amountText);
-    if(from!==memberId) throw new Error('내가 보낼 정산만 완료 처리할 수 있어요.');
+    if((from===FUND_ID?(session?.ownerId||t.members[0].id):from)!==memberId) throw new Error('내가 보낼 정산만 완료 처리할 수 있어요.');
     const transfer=settlementPlan(t).find(p=>p.from===from&&p.to===to&&p.amount===value);
     if(!transfer) throw new Error('정산 계획이 바뀌었어요. 최신 내역을 확인해 주세요.');
     const planKey=t.settlementPlanRevision || uid();
     const existing=(t.settlementRecords||[]).some(r=>r.planKey===planKey&&r.from===from&&r.to===to&&r.amount===value);
-    await update(s=>{const trip=s.trips.find(x=>x.id===t.id);trip.settlementPlanRevision=planKey;trip.settlementRecords=trip.settlementRecords||[];trip.settlementRecords=trip.settlementRecords.filter(r=>!(r.planKey===planKey&&r.from===from&&r.to===to&&r.amount===value));if(!existing)trip.settlementRecords.push({planKey,from,to,amount:value,completedBy:memberId,completedAt:new Date().toISOString()});});
+    await update(s=>{const trip=s.trips.find(x=>x.id===t.id);trip.settlementPlanRevision=planKey;trip.settlementRecords=trip.settlementRecords||[];trip.settlementRecords=trip.settlementRecords.filter(r=>!(r.planKey===planKey&&r.from===from&&r.to===to&&r.amount===value));if(!existing)trip.settlementRecords.push({planKey,from,to,amount:value,completedBy:memberId,ledger:true,completedAt:new Date().toISOString()});});
     return;
   }
   } catch(error) { toast(error.message); }

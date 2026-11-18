@@ -157,3 +157,26 @@ test('동시에 두 참여자가 완료 표시를 저장하면 한 변경은 충
   assert.equal((await call(path,{token:owner.token})).data.trip.settlementRecords.length,1);
 });
 
+
+test('공동 자금 지급은 보관자만 표시하고 이후 지출 수정에도 실제 지급액을 보존한다',async t=>{
+ const {call,create}=await fixture(t),owner=await create(),path=`/api/trips/${owner.trip.id}`;
+ const invitation=await call(path+'/invites',{token:owner.token,method:'POST',data:{memberId:owner.trip.members[1].id}});
+ const guest=(await call('/api/invites/'+invitation.data.inviteToken+'/join',{method:'POST',data:{}})).data;
+ let saved=(await call(path,{token:owner.token})).data;
+ let trip=structuredClone(saved.trip);
+ const [a,b]=trip.members.map(m=>m.id);
+ trip.fundEntries=[a,b].map(memberId=>({id:memberId,memberId,kind:'contribution',amount:10000,date:'2026-11-18'}));
+ trip.expenses=[{id:'fund-expense',title:'지출',amount:12000,itemId:null,payerId:a,payment:'fund',shares:splitExpense(12000,[a,b])}];
+ trip.settlementPlanRevision='fund-rev';
+ saved=(await call(path,{token:owner.token,method:'PATCH',data:{trip,version:saved.version}})).data;
+ const {FUND_ID,fundBalance}=await import('../model.mjs');
+ trip=structuredClone(saved.trip);trip.settlementRecords=[{from:FUND_ID,to:a,amount:4000,planKey:'fund-rev',ledger:true,completedBy:a,completedAt:new Date().toISOString()}];
+ assert.equal((await call(path,{token:guest.token,method:'PATCH',data:{trip,version:saved.version}})).status,403);
+ saved=(await call(path,{token:owner.token,method:'PATCH',data:{trip,version:saved.version}})).data;
+ trip=structuredClone(saved.trip);trip.expenses[0].amount=14000;trip.expenses[0].shares=splitExpense(14000,[a,b]);trip.settlementPlanRevision='fund-rev-two';
+ const changed=await call(path,{token:guest.token,method:'PATCH',data:{trip,version:saved.version}});
+ assert.equal(changed.status,200);
+ const seen=(await call(path,{token:owner.token})).data;
+ assert.equal(fundBalance(seen.trip),2000);
+ assert.deepEqual(balances(seen.trip).map(m=>m.balance),[-1000,3000]);
+});

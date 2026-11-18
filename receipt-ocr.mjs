@@ -4,7 +4,7 @@ let progressCallback = () => {};
 async function worker() {
   if (!workerPromise) {
     workerPromise = import('https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.esm.min.js')
-      .then(({ createWorker }) => createWorker('kor+eng', 1, {
+      .then(({ default: Tesseract }) => Tesseract.createWorker('kor+eng', 1, {
         logger: message => {
           if (message.status === 'recognizing text' && Number.isFinite(message.progress)) progressCallback(message.progress);
         }
@@ -31,9 +31,10 @@ function parseDate(text) {
 function parseAmount(text) {
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const totalLabels = /(합\s*계|총\s*액|결제\s*금액|받을\s*금액|승인\s*금액|청구\s*금액|결제\s*합계)/;
-  const ignoredLabels = /(공급가|부가세|세액|할인|잔액|포인트|사업자|전화|카드번호)/;
+  const ignoredLabels = /(공급가|부가세|세액|할인|잔액|포인트|사업자|전화|카드번호|승인번호|거래번호|주문번호)/;
   const candidates = [];
   for (const [index, line] of lines.entries()) {
+    if (!totalLabels.test(line) && (ignoredLabels.test(line) || /(?:20\d{2})\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2}/.test(line))) continue;
     const numbers = [...line.matchAll(/(?:₩|￦)?\s*(\d[\d,]{2,})\s*원?/g)]
       .map(match => Number(match[1].replaceAll(',', '')))
       .filter(value => value > 0 && value <= 1_000_000_000);
@@ -49,9 +50,10 @@ function parseAmount(text) {
     }
     numbers.forEach(value => candidates.push({ value, priority, index }));
   }
-  if (!candidates.length) return '';
+  if (!candidates.length) return { amount: '', amountConfidence: 'low' };
   candidates.sort((a, b) => b.priority - a.priority || b.index - a.index);
-  return candidates[0].value;
+  const best=candidates[0];
+  return {amount:best.value,amountConfidence:best.priority>=2?'high':'low'};
 }
 
 function parseTitle(text) {
@@ -61,16 +63,22 @@ function parseTitle(text) {
 }
 
 export function parseReceiptText(text) {
-  return { title: parseTitle(text), amount: parseAmount(text), spent_on: parseDate(text) };
+  return { title: parseTitle(text), ...parseAmount(text), spent_on: parseDate(text) };
 }
 
-export async function recognizeReceipt(file, onProgress = () => {}) {
-  progressCallback = onProgress;
-  try {
-    const ocr = await worker();
-    const result = await ocr.recognize(file);
-    return { ...parseReceiptText(result.data.text), text: result.data.text };
-  } finally {
-    progressCallback = () => {};
-  }
+let recognitionQueue = Promise.resolve();
+export function recognizeReceipt(file, onProgress = () => {}) {
+  // A worker has one progress logger; serialize jobs from reopened dialogs.
+  const job = recognitionQueue.then(async () => {
+    progressCallback = onProgress;
+    try {
+      const ocr = await worker();
+      const result = await ocr.recognize(file);
+      return { ...parseReceiptText(result.data.text), text: result.data.text };
+    } finally {
+      progressCallback = () => {};
+    }
+  });
+  recognitionQueue = job.catch(() => {});
+  return job;
 }

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SUPABASE_URL } from './config.mjs';
-import { STATUS, validDates, splitExpense, settlementPlan } from './model.mjs';
+import { STATUS, validDates, splitExpense, settlementPlan, FUND_ID, validateLedger } from './model.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(32).toString('hex');
@@ -29,13 +29,14 @@ export function validateTrip(t) {
     try { shares = splitExpense(e.amount, e.shares.map(s => s.memberId)); } catch { fail(400, '분할 금액 또는 참여자가 올바르지 않아요.'); }
     if (shares.some((s, i) => s.amount !== e.shares[i].amount)) fail(400, '분할 금액이 일치하지 않아요.');
   }
+  try { validateLedger(t); } catch (error) { fail(400, error.message); }
   if (t.settlementPlanRevision !== undefined && !id(t.settlementPlanRevision)) fail(400, '정산 계획 버전을 확인해 주세요.');
   if (t.settlementRecords !== undefined) {
     if (!Array.isArray(t.settlementRecords) || t.settlementRecords.length > 4000) fail(400, '정산 완료 기록을 확인해 주세요.');
     const keys = new Set();
     for (const record of t.settlementRecords) {
       const key = [record?.planKey,record?.from,record?.to,record?.amount].join(':');
-      if (!id(record?.planKey) || !members.has(record.from) || !members.has(record.to) || record.from === record.to || !Number.isSafeInteger(record.amount) || record.amount < 1 || record.amount > 2_000_000_000_000 || record.completedBy !== record.from || typeof record.completedAt !== 'string' || !Number.isFinite(Date.parse(record.completedAt)) || keys.has(key)) fail(400, '정산 완료 기록을 확인해 주세요.');
+      if ((record?.ledger !== undefined && typeof record.ledger !== 'boolean') || !id(record?.planKey) || (!members.has(record.from) && record.from !== FUND_ID) || (!members.has(record.to) && record.to !== FUND_ID) || record.from === record.to || !Number.isSafeInteger(record.amount) || record.amount < 1 || record.amount > 2_000_000_000_000 || record.completedBy !== (record.from === FUND_ID ? t.members[0].id : record.from) || typeof record.completedAt !== 'string' || !Number.isFinite(Date.parse(record.completedAt)) || keys.has(key)) fail(400, '정산 완료 기록을 확인해 주세요.');
       keys.add(key);
     }
   }
@@ -48,13 +49,13 @@ function validateSettlementChange(previous, next, memberId) {
   const newKeys = new Set(newRecords.map(r => JSON.stringify(r)));
   for (const record of oldRecords) {
     if (newKeys.has(JSON.stringify(record))) continue;
-    if (record.from !== memberId || record.planKey !== previous.settlementPlanRevision) fail(403, '다른 참여자의 정산 완료 기록은 변경할 수 없어요.');
+    if ((record.from === FUND_ID ? previous.members[0].id : record.from) !== memberId || record.planKey !== previous.settlementPlanRevision) fail(403, '다른 참여자의 정산 완료 기록은 변경할 수 없어요.');
   }
   const currentPlan = settlementPlan(next);
   for (const record of newRecords) {
     if (oldKeys.has(JSON.stringify(record))) continue;
     const validTransfer = currentPlan.some(p => p.from === record.from && p.to === record.to && p.amount === record.amount);
-    if (record.from !== memberId || record.completedBy !== memberId || record.planKey !== next.settlementPlanRevision || !validTransfer) fail(403, '내 정산 계획에 있는 송금만 완료 처리할 수 있어요.');
+    if ((record.from === FUND_ID ? next.members[0].id : record.from) !== memberId || record.completedBy !== memberId || record.planKey !== next.settlementPlanRevision || !validTransfer) fail(403, '내 정산 계획에 있는 송금만 완료 처리할 수 있어요.');
   }
 }
 
@@ -115,7 +116,7 @@ export function createMoaServer({ dataDir = process.env.MOA_DATA_DIR || join(roo
     if (req.method === 'OPTIONS') { res.writeHead(origin && origins.has(origin) ? 204 : 403); res.end(); return; }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' ${SUPABASE_URL ? new URL(SUPABASE_URL).origin : ''}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://cdn.jsdelivr.net https://tessdata.projectnaptha.com ${SUPABASE_URL ? new URL(SUPABASE_URL).origin : ''}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
       if (path === '/api/health' && req.method === 'GET') return json(res, 200, { ok: true });
@@ -197,7 +198,7 @@ export function createMoaServer({ dataDir = process.env.MOA_DATA_DIR || join(roo
         fail(405, '지원하지 않는 요청이에요.');
       }
       if (path.startsWith('/api/')) fail(404, '요청한 기능을 찾을 수 없어요.');
-      const files = { '/': ['index.html','text/html'], '/index.html': ['index.html','text/html'], '/app.mjs': ['app.mjs','text/javascript'], '/finance.mjs': ['finance.mjs','text/javascript'], '/finance-model.mjs': ['finance-model.mjs','text/javascript'], '/auth.mjs': ['auth.mjs','text/javascript'], '/account.mjs': ['account.mjs','text/javascript'], '/shared.mjs': ['shared.mjs','text/javascript'], '/config.mjs': ['config.mjs','text/javascript'], '/supabase-client.mjs': ['supabase-client.mjs','text/javascript'], '/model.mjs': ['model.mjs','text/javascript'], '/styles.css': ['styles.css','text/css'], '/assets/travel.svg': ['assets/travel.svg','image/svg+xml'] };
+      const files = { '/': ['index.html','text/html'], '/index.html': ['index.html','text/html'], '/receipt-ocr.mjs': ['receipt-ocr.mjs','text/javascript'], '/app.mjs': ['app.mjs','text/javascript'], '/finance.mjs': ['finance.mjs','text/javascript'], '/finance-model.mjs': ['finance-model.mjs','text/javascript'], '/auth.mjs': ['auth.mjs','text/javascript'], '/account.mjs': ['account.mjs','text/javascript'], '/shared.mjs': ['shared.mjs','text/javascript'], '/config.mjs': ['config.mjs','text/javascript'], '/supabase-client.mjs': ['supabase-client.mjs','text/javascript'], '/model.mjs': ['model.mjs','text/javascript'], '/styles.css': ['styles.css','text/css'], '/assets/travel.svg': ['assets/travel.svg','image/svg+xml'] };
       if (!files[path] || !['GET','HEAD'].includes(req.method)) fail(404, '페이지를 찾을 수 없어요.');
       const [file, type] = files[path];
       const content = readFileSync(join(root, file));

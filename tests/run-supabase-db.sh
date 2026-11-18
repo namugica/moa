@@ -24,6 +24,9 @@ docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supab
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance.sql
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance.sql
 docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/finance-tests.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/receipt-ledger.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/receipt-ledger.sql
+docker exec -i "$MOA_TEST_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < supabase/receipt-ledger-tests.sql
 if [ "${MOA_BROWSER_TEST:-0}" = 1 ]; then python3 tests/supabase-browser-smoke.py; fi
 
 if [ "${MOA_FINANCE_BROWSER_TEST:-0}" = 1 ]; then python3 tests/finance-browser-smoke.py; fi

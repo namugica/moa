@@ -1,10 +1,23 @@
 let workerPromise;
-const progressListeners = new Set();
+const progressListeners = new Map();
 
 function notify(progress, stage) {
-  for (const listener of progressListeners) {
+  for (const listener of progressListeners.keys()) {
     try { listener(progress, stage); } catch {}
   }
+}
+
+function attachProgressListener(listener) {
+  if (typeof listener !== 'function') return () => {};
+  progressListeners.set(listener, (progressListeners.get(listener) || 0) + 1);
+  let attached = true;
+  return () => {
+    if (!attached) return;
+    attached = false;
+    const count = progressListeners.get(listener) || 0;
+    if (count <= 1) progressListeners.delete(listener);
+    else progressListeners.set(listener, count - 1);
+  };
 }
 
 export function receiptOCRStageName(stage) {
@@ -43,8 +56,8 @@ async function getWorker() {
 }
 
 export function prepareReceiptOCR(onProgress = () => {}) {
-  if (onProgress) progressListeners.add(onProgress);
-  return getWorker().finally(() => progressListeners.delete(onProgress));
+  const detach = attachProgressListener(onProgress);
+  return getWorker().finally(detach);
 }
 
 function parseDate(text) {
@@ -176,7 +189,7 @@ function findReceiptCrop(source, sourceWidth, sourceHeight) {
   return { x, y, width: cropWidth, height: cropHeight };
 }
 
-async function preprocessReceiptImage(file, onProgress = () => {}) {
+async function preprocessReceiptImage(file) {
   let bitmap, objectUrl;
   try {
     if (typeof createImageBitmap === 'function') {
@@ -260,12 +273,12 @@ let recognitionQueue = Promise.resolve();
 
 export function recognizeReceipt(file, onProgress = () => {}) {
   const job = recognitionQueue.then(async () => {
-    if (onProgress) progressListeners.add(onProgress);
+    const detach = attachProgressListener(onProgress);
     try {
       const ocr = await getWorker();
       notify(0, 'photo-preprocess');
       let image = file;
-      try { image = await preprocessReceiptImage(file, onProgress); }
+      try { image = await preprocessReceiptImage(file); }
       catch { image = file; }
       const first = parseOCRResult((await ocr.recognize(image)).data);
       const shouldRetry = !first.amount || first.confidence < 32 || (first.amountConfidence === 'low' && first.confidence < 55);
@@ -274,7 +287,7 @@ export function recognizeReceipt(file, onProgress = () => {}) {
       const second = parseOCRResult((await ocr.recognize(file)).data);
       return mergeCandidates(first, second);
     } finally {
-      if (onProgress) progressListeners.delete(onProgress);
+      detach();
     }
   });
   recognitionQueue = job.catch(() => {});

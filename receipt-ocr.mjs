@@ -1,9 +1,14 @@
 let workerPromise;
+let progressCallback = () => {};
 
 async function worker() {
   if (!workerPromise) {
     workerPromise = import('https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.esm.min.js')
-      .then(({ createWorker }) => createWorker('kor+eng'))
+      .then(({ createWorker }) => createWorker('kor+eng', 1, {
+        logger: message => {
+          if (message.status === 'recognizing text' && Number.isFinite(message.progress)) progressCallback(message.progress);
+        }
+      }))
       .catch(error => {
         workerPromise = undefined;
         throw error;
@@ -60,11 +65,12 @@ export function parseReceiptText(text) {
 }
 
 export async function recognizeReceipt(file, onProgress = () => {}) {
-  const ocr = await worker();
-  const result = await ocr.recognize(file, {}, {
-    logger: message => {
-      if (message.status === 'recognizing text' && Number.isFinite(message.progress)) onProgress(message.progress);
-    }
-  });
-  return { ...parseReceiptText(result.data.text), text: result.data.text };
+  progressCallback = onProgress;
+  try {
+    const ocr = await worker();
+    const result = await ocr.recognize(file);
+    return { ...parseReceiptText(result.data.text), text: result.data.text };
+  } finally {
+    progressCallback = () => {};
+  }
 }

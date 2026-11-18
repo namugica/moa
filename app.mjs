@@ -1,5 +1,5 @@
-import { mountFinance } from './finance.mjs?v=20261118-ledger';
-import { recognizeReceipt } from './receipt-ocr.mjs?v=20261118-ledger';
+import { mountFinance } from './finance.mjs?v=20261118-ocrfast';
+import { prepareReceiptOCR, recognizeReceipt, receiptOCRStageName } from './receipt-ocr.mjs?v=20261118-ocrfast';
 import { STATUS, uid, amount, splitExpense, balances, totalCost, newTrip, settlementPlan, settlementProgress, FUND_ID, fundBalance } from './model.mjs?v=20261118-ledger';
 import { auth } from './account.mjs';
 import { SESSION_KEY, request, subscribe, CONNECTION_LABEL } from './shared.mjs';
@@ -239,7 +239,7 @@ function fundForm(t,kind='contribution') {
 function expenseForm(t,id,capture=false) {
   const old=t.expenses.find(e=>e.id===id), meId=sessions[t.id]?.memberId||t.members[0].id;
   const selectedPayment=old?.payment||(fundBalance(t)>0?'fund':'personal');
-  const fields=`<label class="receipt-picker receipt-main" for="f-receipt-photo">${cameraIcon}<span><strong>${old?'영수증 다시 읽기':'영수증 찍기'}</strong><small>사진 선택도 가능해요</small></span><input id="f-receipt-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><label class="receipt-gallery" for="f-receipt-gallery">사진에서 가져오기<input id="f-receipt-gallery" type="file" accept="image/jpeg,image/png,image/webp"></label><p class="receipt-status" data-expense-ocr role="status" aria-live="polite"></p><div class="amount-field">${input('금액','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0" inputmode="numeric"')}<span>원</span></div><label>어떤 돈으로 냈나요?</label><div class="payment-options"><label><input type="radio" name="payment" value="fund" ${selectedPayment==='fund'?'checked':''}><span>공동 자금</span></label><label><input type="radio" name="payment" value="personal" ${selectedPayment==='personal'?'checked':''}><span>개인 돈</span></label></div><div data-payer-field><label for="f-payerId">결제한 사람</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${esc(m.id)}" ${(old?.payerId||meId)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div><label>함께 부담할 사람</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${esc(m.id)}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="split-preview" data-split-preview></p><p class="duplicate-note" data-duplicate hidden></p><details class="expense-options"><summary>상세 정보</summary><div class="expense-options-body">${input('사용 날짜','spentOn',old?.spentOn||today(),'date','required')}${input('메모 (선택)','title',old?.title==='지출'?'':old?.title||'','text','maxlength="100" placeholder="자동으로 읽은 가게명 또는 메모"')}<p class="help">사진은 인식에만 사용하고 저장하지 않아요.</p></div></details>`;
+  const fields=`<label class="receipt-picker receipt-main" for="f-receipt-photo">${cameraIcon}<span><strong>${old?'영수증 다시 읽기':'영수증 찍기'}</strong><small>사진 선택도 가능해요</small></span><input id="f-receipt-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><p class="receipt-photo-tip">영수증을 펼쳐 전체가 보이게 하고, 빛 반사 없이 정면에서 찍어 주세요.</p><label class="receipt-gallery" for="f-receipt-gallery">사진에서 가져오기<input id="f-receipt-gallery" type="file" accept="image/jpeg,image/png,image/webp"></label><p class="receipt-status" data-expense-ocr role="status" aria-live="polite"></p><div class="amount-field">${input('금액','amount',old?.amount??'','number','required min="1" max="1000000000" step="1" placeholder="0" inputmode="numeric"')}<span>원</span></div><label>어떤 돈으로 냈나요?</label><div class="payment-options"><label><input type="radio" name="payment" value="fund" ${selectedPayment==='fund'?'checked':''}><span>공동 자금</span></label><label><input type="radio" name="payment" value="personal" ${selectedPayment==='personal'?'checked':''}><span>개인 돈</span></label></div><div data-payer-field><label for="f-payerId">결제한 사람</label><select id="f-payerId" name="payerId">${t.members.map(m=>`<option value="${esc(m.id)}" ${(old?.payerId||meId)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div><label>함께 부담할 사람</label><div class="check-list">${t.members.map(m=>`<label><input type="checkbox" name="participants" value="${esc(m.id)}" ${!old||old.shares.some(s=>s.memberId===m.id)?'checked':''}>${esc(m.name)}</label>`).join('')}</div><p class="split-preview" data-split-preview></p><p class="duplicate-note" data-duplicate hidden></p><details class="expense-options"><summary>상세 정보</summary><div class="expense-options-body">${input('사용 날짜','spentOn',old?.spentOn||today(),'date','required')}${input('메모 (선택)','title',old?.title==='지출'?'':old?.title||'','text','maxlength="100" placeholder="자동으로 읽은 가게명 또는 메모"')}<p class="help">사진은 인식에만 사용하고 저장하지 않아요.</p></div></details>`;
   let duplicateAccepted=false;
   open(old?'지출 수정':'지출 기록',fields,data=>{
     const value=amount(data.get('amount'));if(!value)throw Error('1원 이상 입력해 주세요.');
@@ -250,6 +250,13 @@ function expenseForm(t,id,capture=false) {
     return update(s=>{const trip=s.trips.find(x=>x.id===t.id);if(old)trip.expenses[trip.expenses.findIndex(e=>e.id===id)]=expense;else trip.expenses.push(expense);trip.settlementPlanRevision=uid();});
   });
   const dialog=$('#editor'),form=$('#editor-form'),photo=$('#f-receipt-photo'),gallery=$('#f-receipt-gallery'),status=$('[data-expense-ocr]'),save=dialog.querySelector('[type="submit"]');
+  const thisFields=$('#dialog-fields').firstElementChild,active=()=>dialog.open&&thisFields.isConnected;
+  const showProgress=(progress,stage)=>{
+    if(!active())return;
+    status.className='receipt-status is-reading';
+    const label=receiptOCRStageName(stage);
+    status.textContent=label+(Number.isFinite(progress)&&progress>0?' '+Math.round(progress*100)+'%':'');
+  };
   save.textContent='기록하기';
   const refresh=()=>{
     duplicateAccepted=false;$('[data-duplicate]').hidden=true;
@@ -262,11 +269,9 @@ function expenseForm(t,id,capture=false) {
   const readPhoto=async event=>{
     const file=event.currentTarget.files?.[0];if(!file||reading)return;
     if(file.size>12582912||!['image/jpeg','image/png','image/webp'].includes(file.type)){status.textContent='12MB 이하 JPG·PNG·WebP 사진을 선택해 주세요.';status.className='receipt-status needs-check';return;}
-    reading=true;photo.disabled=true;gallery.disabled=true;save.disabled=true;status.className='receipt-status is-reading';status.textContent='영수증 준비 중…';
-    const thisFields=$('#dialog-fields').firstElementChild;
-    const active=()=>dialog.open&&thisFields.isConnected;
+    reading=true;photo.disabled=true;gallery.disabled=true;save.disabled=true;status.className='receipt-status is-reading';status.textContent='사진을 보정하고 있어요…';
     try{
-      const found=await recognizeReceipt(file,progress=>{if(active())status.textContent=`읽는 중 ${Math.round(progress*100)}%`;});
+      const found=await recognizeReceipt(file,showProgress);
       if(!active())return;
       if(found.title)$('#f-title').value=found.title;
       $('#f-amount').value=found.amount||'';
@@ -280,6 +285,10 @@ function expenseForm(t,id,capture=false) {
     finally{reading=false;if(photo.isConnected)photo.disabled=false;if(gallery.isConnected)gallery.disabled=false;if(save.isConnected)save.disabled=false;}
   };
   photo.addEventListener('change',readPhoto);gallery.addEventListener('change',readPhoto);
+  prepareReceiptOCR(showProgress).catch(error=>{
+    if(active()){status.className='receipt-status needs-check';status.textContent='인식 엔진을 준비하지 못했어요. 금액을 직접 입력할 수 있어요.';}
+    console.error('Receipt OCR warmup failed',error);
+  });
   if(capture)photo.click();
 }
 function confirmAction(title,message,action) { open(title,`<p>${esc(message)}</p>`,()=>update(action)); }

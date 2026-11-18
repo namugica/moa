@@ -382,3 +382,5 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #78
 .group-header>.button{align-self:flex-start}
 .receipt-gallery{position:relative;display:block!important;margin:8px 0 12px!important;text-align:center;font-size:12px!important;font-weight:500!important;color:#617e9f!important;cursor:pointer;padding:7px;border-radius:8px}.receipt-gallery:hover{background:#f0f6ff}.receipt-gallery input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.receipt-gallery:focus-within{outline:3px solid #78aaf5;outline-offset:2px}
 #editor{overflow:hidden;max-height:90dvh}#editor-form{display:flex;flex-direction:column;max-height:90dvh}#editor-form .dialog-header,#editor-form .dialog-actions,#form-error{flex-shrink:0}#dialog-fields{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:3px}
+
+.receipt-photo-tip{margin:2px 0 8px;color:#7a8b9e;font-size:11px;line-height:1.55}

@@ -1,7 +1,7 @@
 import { auth } from './account.mjs';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.mjs';
 import { financeTotals } from './finance-model.mjs';
-import { recognizeReceipt } from './receipt-ocr.mjs?v=20261118-ledger';
+import { recognizeReceipt } from './receipt-ocr.mjs?v=20261118-ocrfast';
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => new Intl.NumberFormat('ko-KR').format(n)+'원';
 const labels = {submitted:'검토 대기',approved:'승인',changes:'보완 요청',rejected:'반려'};

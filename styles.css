@@ -2,6 +2,26 @@
 @media(max-width:700px){.app-shell{padding:0 20px}.app-header{height:64px}.brand{font-size:24px}.global-sync{font-size:11px}.header-right{gap:10px}main{padding:35px 0 50px}.page-heading{align-items:flex-start;flex-direction:column;margin-bottom:30px;gap:18px}.page-heading h1,.group-header h1{font-size:29px}.cards{grid-template-columns:1fr}.group-card,.new-card{min-height:170px}.settlement-board{grid-template-columns:1fr}.my-total{padding:22px}.board-total{padding:19px 22px}.group-header{align-items:flex-start;flex-direction:column}.group-header>.button{align-self:stretch}.panel{padding:20px 17px;border-radius:17px}.plan-summary{font-size:10px}.transfer-row{align-items:flex-start;padding:14px 0}.transfer-action{align-items:flex-end;flex-direction:column;gap:8px}.transfer-people{gap:9px}.person-avatar{width:33px;height:33px}.transfer-people strong{font-size:12px}.expense-row{align-items:flex-start}.expense-main{gap:9px}.expense-main strong{font-size:13px}.expense-amount{align-items:flex-end;flex-direction:column;gap:5px}.expense-amount>span{gap:10px}.expense-amount>strong{font-size:13px}.expense-icon{width:34px;height:34px}.login-buttons{flex-direction:column}footer{align-items:flex-start;flex-wrap:wrap;gap:7px 11px}.invite-landing{margin:15px auto;padding:27px 20px}#editor-form{padding:21px 20px}.global-sync:before{margin-right:5px}}
 @media(max-width:390px){.app-shell{padding:0 15px}.global-sync{max-width:120px;overflow:hidden;white-space:nowrap}.group-card,.new-card{padding:19px}.my-total-breakdown{gap:22px}.plan-summary{max-width:145px;text-align:right;line-height:1.5}}
 
+/* Fast personal expense entry */
+.receipt-picker{position:relative;display:flex!important;align-items:center;gap:13px;margin:0 0 8px!important;padding:16px;border:1px dashed #cbd1cc;border-radius:13px;background:#f8f9f8;color:#292c28!important;cursor:pointer}
+.receipt-picker:hover{border-color:var(--accent);background:#fffaf8}
+.receipt-picker-icon{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:11px;background:#292c28;color:#fff;font-size:22px}
+.receipt-picker strong,.receipt-picker small{display:block}
+.receipt-picker strong{font-size:14px}
+.receipt-picker small{margin-top:4px;color:#858a86;font-size:11px;font-weight:400}
+.receipt-picker input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.receipt-picker input[type=file]:focus-visible{outline:3px solid #ee7056;outline-offset:3px;border-radius:12px}
+.receipt-status{min-height:18px;margin:5px 0 14px;color:#777c78;font-size:11px;line-height:1.5}
+.expense-options{margin-top:16px;border-top:1px solid #eceeec;padding-top:12px}
+.expense-options summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;color:#424742;font-size:12px;font-weight:700;list-style:none}
+.expense-options summary::-webkit-details-marker{display:none}
+.expense-options summary:after{content:"＋";color:#ee7056;font-size:15px}
+.expense-options[open] summary:after{content:"−"}
+.expense-options summary small{color:#929793;font-weight:400;text-align:right}
+.expense-options-body{padding-top:5px}
+.expense-options-body>label{display:block;margin:14px 0 7px;font-size:13px;font-weight:650;color:#414e60}
+.expense-options-body>input,.expense-options-body>select{width:100%;height:44px;border:1px solid #dfe4eb;border-radius:10px;padding:0 11px;background:white;color:var(--ink)}
+
 /* MOA Mono Point: a crisp ledger with one coral mark */
 :root{color:#252724;background:#f4f5f5;--blue:#30332f;--blue-dark:#161815;--ink:#252724;--muted:#777c78;--line:#e3e5e3;--surface:#fff;--green:#50735e;--accent:#ee7056}
 body{background:#f4f5f5;color:#252724}

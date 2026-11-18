@@ -1,6 +1,7 @@
 import { auth } from './account.mjs';
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.mjs';
 import { financeTotals } from './finance-model.mjs';
+import { recognizeReceipt } from './receipt-ocr.mjs';
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = n => new Intl.NumberFormat('ko-KR').format(n)+'원';
 const labels = {submitted:'검토 대기',approved:'승인',changes:'보완 요청',rejected:'반려'};
@@ -60,7 +61,7 @@ export function mountFinance(root,trip,account) {
       if(!data)return;
       if(action==='submit'||action==='edit'){
         const e=entry||{};
-        dialog(entry?'지출 수정·다시 제출':'지출 제출',field('지출 이름','title',e.title,'required maxlength="100"')+field('금액 (원)','amount',e.amount,'type="number" min="1" max="1000000000" step="1" required')+field('사용 날짜','spent_on',e.spent_on||new Date().toLocaleDateString('sv-SE'),'type="date" required')+field('행사·분류 (선택)','event',e.event,'maxlength="100"')+field('사용 목적','purpose',e.purpose,'required maxlength="500"')+`<label>결제 방식<select name="payment"><option value="personal" ${e.payment==='personal'?'selected':''}>개인 돈으로 결제 · 환급 대상</option><option value="fund" ${e.payment==='fund'?'selected':''}>공동 자금으로 결제</option></select></label><label>영수증 사진 (선택)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label><p class="help">JPG·PNG·WebP, 최대 1.5MB. ${e.has_receipt?'새 사진을 선택하지 않으면 기존 영수증을 유지해요.':''} 자동 인식 없이 내용을 직접 입력해 주세요.</p>`+field('영수증 미첨부 사유','missing_reason',e.missing_reason,'maxlength="500"'),async form=>{
+        dialog(entry?'지출 수정·다시 제출':'지출 제출',field('지출 이름','title',e.title,'required maxlength="100"')+field('금액 (원)','amount',e.amount,'type="number" min="1" max="1000000000" step="1" required')+field('사용 날짜','spent_on',e.spent_on||new Date().toLocaleDateString('sv-SE'),'type="date" required')+field('행사·분류 (선택)','event',e.event,'maxlength="100"')+field('사용 목적','purpose',e.purpose,'required maxlength="500"')+`<label>결제 방식<select name="payment"><option value="personal" ${e.payment==='personal'?'selected':''}>개인 돈으로 결제 · 환급 대상</option><option value="fund" ${e.payment==='fund'?'selected':''}>공동 자금으로 결제</option></select></label><label>영수증 사진 (선택)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-receipt-photo></label><p class="help">JPG·PNG·WebP, 최대 1.5MB. 사진을 선택하면 가게명·금액·날짜를 자동으로 읽어와요. 사진은 이 기기에서 인식하고, 인식된 내용은 저장 전에 직접 확인할 수 있어요. ${e.has_receipt?'새 사진을 선택하지 않으면 기존 영수증을 유지해요.':''}</p><p class="help" data-ocr-status role="status" aria-live="polite">영수증을 촬영하거나 사진을 선택해 주세요.</p>`+field('영수증 미첨부 사유','missing_reason',e.missing_reason,'maxlength="500"'),async form=>{
           const payload=Object.fromEntries([...form].filter(([k])=>k!=='photo'));payload.amount=Number(payload.amount);
           if(entry)Object.assign(payload,{id:e.id,revision:e.revision});
           const file=form.get('photo');
@@ -69,6 +70,34 @@ export function mountFinance(root,trip,account) {
             payload.receipt=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('사진을 읽지 못했어요.'));reader.readAsDataURL(file);});
           }
           await api(trip.id,'submit',payload);
+        });
+        const d=root.querySelector('dialog[open]');
+        const photo=d?.querySelector('[data-receipt-photo]');
+        const status=d?.querySelector('[data-ocr-status]');
+        photo?.addEventListener('change',async()=>{
+          const file=photo.files?.[0];if(!file)return;
+          if(file.size>1572864||!['image/jpeg','image/png','image/webp'].includes(file.type)){
+            status.textContent='1.5MB 이하 JPG·PNG·WebP 사진을 선택해 주세요.';return;
+          }
+          status.textContent='사진을 읽고 있어요. 처음에는 인식 준비로 조금 더 걸릴 수 있어요.';
+          photo.disabled=true;
+          try{
+            const found=await recognizeReceipt(file,progress=>{
+              if(status)status.textContent=`영수증을 읽고 있어요… ${Math.round(progress*100)}%`;
+            });
+            if(!d.isConnected)return;
+            if(found.title)d.querySelector('[name="title"]').value=found.title;
+            if(found.amount)d.querySelector('[name="amount"]').value=found.amount;
+            if(found.spent_on)d.querySelector('[name="spent_on"]').value=found.spent_on;
+            const missing=[];
+            if(!found.title)missing.push('가게명');
+            if(!found.amount)missing.push('금액');
+            if(!found.spent_on)missing.push('날짜');
+            status.textContent=missing.length?`인식이 끝났어요. ${missing.join('·')}은 직접 입력해 주세요. 모든 항목을 확인한 뒤 저장하세요.`:'인식이 끝났어요. 입력된 가게명·금액·날짜를 확인하고 저장하세요.';
+          }catch(error){
+            if(status)status.textContent='자동 인식에 실패했어요. 사진을 다시 선택하거나 내용을 직접 입력해 주세요.';
+            console.error('Receipt OCR failed',error);
+          }finally{if(photo?.isConnected)photo.disabled=false;}
         });
       }
       if(action==='review')dialog('지출 검토',`<p>${esc(entry.title)} · ${money(entry.amount)}</p><label>처리<select name="status"><option value="approved">승인</option><option value="changes">보완 요청</option><option value="rejected">반려</option></select></label>`+field('사유 (보완·반려 시 필수)','note','','maxlength="500"'),form=>api(trip.id,'review',{...Object.fromEntries(form),id:entry.id,revision:entry.revision}));

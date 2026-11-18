@@ -179,6 +179,7 @@ main{padding-top:48px}
 .space-card-total strong{color:#183657;font-size:17px;letter-spacing:-.3px}
 .space-card-status{max-width:58%;padding:7px 9px;border-radius:9px;text-align:right;font-size:11px;font-weight:650}
 .space-card-status.is-pending{background:#eef4fa;color:#42698f}
+.space-card-status.is-before{background:#f2f5f9;color:#61758d}
 .space-card-status.is-settled{background:#eff6f2;color:#4a8067}
 .new-card{min-height:218px;justify-content:center;gap:8px;background:#f9fbfd;border:1px dashed #bfcede;color:#284b6d}
 .new-card .plus{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:#eaf2fa;color:#315f91;font-size:22px}
